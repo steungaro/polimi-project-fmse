@@ -13,13 +13,10 @@ const int INITIAL_TIMEOUT = 300;
 // FROG
 int[0, MAX_X] frog_x = 9; // Frogger's current X position.
 int[0, MAX_Y] frog_y = 0; // Frogger's current Y position.
-int[-1, 1] frog_dir_x = 0; // (For the Stochastic version) the direction Frogger intends to move.
-int[-1, 1] frog_dir_y = 0; // (For the Stochastic version) the direction Frogger intends to move.
 
 // GAME PROGRESSION
 int[0, 5] lives = 5; // The player starts with 5 lives.
 int score = 0; // Total points scored.
-int level = 1; // Current game level.
 int[0, 5] home_bays_filled = 0; // Tracks how many of the 5 bays are occupied.
 bool bay_occupied[5]; // An array tracking which specific bays are filled (Indices 0 to 4 mapping to the 5 home bay pairs).
 
@@ -37,12 +34,153 @@ broadcast chan die; // Triggered when Frogger touches a vehicle, submerging turt
 broadcast chan score_bay; // Triggered when Frogger lands in an empty home bay.
 broadcast chan new_level; // Triggered when home_bays_filled == 5.</declaration>
 	<template>
-		<name x="5" y="5">Template</name>
-		<declaration>// Place local declarations here.
-</declaration>
-		<location id="id0" x="0" y="0">
+		<name x="5" y="5">Vehicle</name>
+		<parameter>const int size, const int speed, const int start_x, const int y_row</parameter>
+		<declaration>clock c;
+int current_x;
+
+// Updates the danger map for the vehicle's footprint
+void update_footprint(bool is_danger) {
+    for (int i = 0; i &lt; size; i++) {
+        int px = current_x + i;
+        // Only update if it is currently within the visible screen
+        if (px &gt;= 0 &amp;&amp; px &lt;= MAX_X) {
+            danger[px][y_row] = is_danger;
+        }
+    }
+}
+
+void move() {
+    update_footprint(false); // Clear old position
+    
+    if (y_row % 2 != 0) { 
+        // Odd rows move Right to Left
+        current_x--;
+        // Reappear on the opposite side after 2 cell delay
+        if (current_x &lt; -2) {
+            current_x = MAX_X;
+        }
+    } else { 
+        // Even rows move Left to Right
+        current_x++;
+        if (current_x &gt; MAX_X + 2) {
+            current_x = -size; // Start sliding in from the left
+        }
+    }
+    
+    update_footprint(true);  // Draw new position
+}</declaration>
+		<location id="id0" x="-85" y="0">
+			<name x="-95" y="-34">Init</name>
+			<committed/>
+		</location>
+		<location id="id1" x="170" y="0">
+			<name x="160" y="-34">Driving</name>
+			<label kind="invariant" x="160" y="17">c &lt;= speed</label>
 		</location>
 		<init ref="id0"/>
+		<transition id="id2">
+			<source ref="id1"/>
+			<target ref="id1"/>
+			<label kind="guard" x="188" y="-59">c &gt;= speed</label>
+			<label kind="assignment" x="297" y="-25">move(),
+c = 0</label>
+			<nail x="357" y="-51"/>
+			<nail x="357" y="25"/>
+		</transition>
+		<transition id="id3">
+			<source ref="id0"/>
+			<target ref="id1"/>
+			<label kind="assignment" x="-68" y="8">current_x = start_x,
+update_footprint(true),
+c = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>FloatingObject</name>
+		<parameter>const int size, const int speed, const int start_x, const int y_row</parameter>
+		<declaration>clock c;
+int current_x;
+
+// Updates the safe_platform map for the object's footprint
+void update_footprint(bool is_safe) {
+    for (int i = 0; i &lt; size; i++) {
+        int px = current_x + i;
+        // Only update if it is currently within the visible screen
+        if (px &gt;= 0 &amp;&amp; px &lt;= MAX_X) {
+            safe_platform[px][y_row] = is_safe;
+        }
+    }
+}
+
+void move() {
+    // Check if Frogger is standing on this specific object BEFORE it moves
+    bool carrying_frog = (frog_y == y_row &amp;&amp; frog_x &gt;= current_x &amp;&amp; frog_x &lt; current_x + size);
+
+    update_footprint(false); // Clear old position
+    
+    // Move Left to Right (Rows 8, 9, 11)
+    if (y_row == 8 || y_row == 9 || y_row == 11) {
+        current_x++;
+        
+        // Object wrap-around
+        if (current_x &gt; MAX_X + 2) {
+            current_x = -size; 
+        }
+        
+        // Carry Frogger and handle his wrap-around
+        if (carrying_frog) {
+            frog_x++;
+            if (frog_x &gt; MAX_X) {
+                frog_x = 0; 
+            }
+        }
+    } 
+    // Move Right to Left (Rows 7, 10)
+    else { 
+        current_x--;
+        
+        // Object wrap-around
+        if (current_x &lt; -2) {
+            current_x = MAX_X;
+        }
+        
+        // Carry Frogger and handle his wrap-around
+        if (carrying_frog) {
+            frog_x--;
+            if (frog_x &lt; 0) {
+                frog_x = MAX_X; 
+            }
+        }
+    }
+
+    update_footprint(true);  // Draw new position
+}</declaration>
+		<location id="id4" x="-527" y="-8">
+			<name x="-544" y="-42">Init</name>
+			<committed/>
+		</location>
+		<location id="id5" x="-255" y="-8">
+			<name x="-265" y="-42">Moving</name>
+			<label kind="invariant" x="-265" y="9">c &lt;= speed</label>
+		</location>
+		<init ref="id4"/>
+		<transition id="id6">
+			<source ref="id5"/>
+			<target ref="id5"/>
+			<label kind="guard" x="-102" y="-51">c &gt;= speed</label>
+			<label kind="assignment" x="-102" y="-25">move(),
+c = 0</label>
+			<nail x="-127" y="59"/>
+			<nail x="-127" y="-85"/>
+		</transition>
+		<transition id="id7">
+			<source ref="id4"/>
+			<target ref="id5"/>
+			<label kind="assignment" x="-509" y="-8">current_x = start_x,
+update_footprint(true),
+c = 0</label>
+		</transition>
 	</template>
 	<system>// Place template instantiations here.
 Process = Template();
