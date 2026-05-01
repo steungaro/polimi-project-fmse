@@ -182,6 +182,162 @@ update_footprint(true),
 c = 0</label>
 		</transition>
 	</template>
+	<template>
+		<name>DivingTurtles</name>
+		<parameter>const int size, const int speed, const int start_x, const int y_row</parameter>
+		<declaration>clock c;
+clock timer;
+int current_x;
+bool submerged = false; // Tracks if the turtle is underwater
+
+// Helper to check if Frogger is standing on THIS specific turtle
+bool carrying_frog() {
+    return (frog_y == y_row &amp;&amp; frog_x &gt;= current_x &amp;&amp; frog_x &lt; current_x + size);
+}
+
+void update_footprint(bool is_safe) {
+    for (int i = 0; i &lt; size; i++) {
+        int px = current_x + i;
+        if (px &gt;= 0 &amp;&amp; px &lt;= MAX_X) {
+            safe_platform[px][y_row] = is_safe;
+        }
+    }
+}
+
+void move() {
+    bool has_frog = carrying_frog();
+    update_footprint(false); // Clear old position
+
+    // Diving turtles only exist on rows 7 and 10, which move Right to Left
+    current_x--;
+    if (current_x &lt; -2) {
+        current_x = MAX_X;
+    }
+
+    // Carry Frogger and wrap him around
+    if (has_frog) {
+        frog_x--;
+        if (frog_x &lt; 0) {
+            frog_x = MAX_X;
+        }
+    }
+
+    // Only draw the new footprint if the turtle is NOT currently submerged
+    if (!submerged) {
+        update_footprint(true);
+    }
+}</declaration>
+		<location id="id8" x="-144" y="102">
+			<name x="-161" y="68">Init</name>
+			<committed/>
+		</location>
+		<location id="id9" x="272" y="102">
+			<name x="297" y="68">Emerged</name>
+			<label kind="invariant" x="34" y="68">c &lt;= speed &amp;&amp; timer &lt;= 100</label>
+		</location>
+		<location id="id10" x="663" y="102">
+			<name x="612" y="170">Diving</name>
+			<label kind="invariant" x="561" y="127">c &lt;= speed &amp;&amp; timer &lt;= 5</label>
+		</location>
+		<location id="id11" x="1045" y="280">
+			<name x="1071" y="246">Submerged</name>
+			<label kind="invariant" x="1071" y="272">c &lt;= speed &amp;&amp; timer &lt;= 100</label>
+		</location>
+		<location id="id12" x="272" y="280">
+			<name x="170" y="246">Emerging</name>
+			<label kind="invariant" x="25" y="271">c &lt;= speed &amp;&amp; timer &lt;= 50</label>
+		</location>
+		<location id="id13" x="1045" y="102">
+			<name x="1035" y="68">CheckSubmerged</name>
+			<committed/>
+		</location>
+		<init ref="id8"/>
+		<transition id="id14">
+			<source ref="id12"/>
+			<target ref="id9"/>
+			<label kind="guard" x="272" y="170">timer &gt;= 50</label>
+			<label kind="assignment" x="272" y="191">timer = 0</label>
+		</transition>
+		<transition id="id15">
+			<source ref="id11"/>
+			<target ref="id12"/>
+			<label kind="guard" x="595" y="255">timer &gt;= 100</label>
+			<label kind="assignment" x="595" y="280">timer = 0,
+submerged = false,
+update_footprint(true)</label>
+		</transition>
+		<transition id="id16">
+			<source ref="id13"/>
+			<target ref="id11"/>
+			<label kind="guard" x="1096" y="178">!carrying_frog()</label>
+			<nail x="1088" y="195"/>
+		</transition>
+		<transition id="id17">
+			<source ref="id13"/>
+			<target ref="id11"/>
+			<label kind="guard" x="867" y="178">carrying_frog()</label>
+			<label kind="synchronisation" x="960" y="204">die!</label>
+			<nail x="994" y="195"/>
+		</transition>
+		<transition id="id18">
+			<source ref="id10"/>
+			<target ref="id13"/>
+			<label kind="guard" x="799" y="76">timer &gt;= 50</label>
+			<label kind="assignment" x="773" y="102">timer = 0,
+submerged = true,
+update_footprint(false)</label>
+		</transition>
+		<transition id="id19">
+			<source ref="id9"/>
+			<target ref="id10"/>
+			<label kind="guard" x="399" y="76">timer &gt;= 100</label>
+			<label kind="assignment" x="408" y="102">timer = 0</label>
+		</transition>
+		<transition id="id20">
+			<source ref="id8"/>
+			<target ref="id9"/>
+			<label kind="assignment" x="-102" y="102">current_x = start_x,
+update_footprint(true),
+c = 0,
+timer = 0</label>
+		</transition>
+		<transition id="id21">
+			<source ref="id12"/>
+			<target ref="id12"/>
+			<label kind="guard" x="170" y="339">c &gt;= speed</label>
+			<label kind="assignment" x="289" y="339">move(),
+c = 0</label>
+			<nail x="246" y="339"/>
+			<nail x="297" y="339"/>
+		</transition>
+		<transition id="id22">
+			<source ref="id11"/>
+			<target ref="id11"/>
+			<label kind="guard" x="952" y="348">c &gt;= speed</label>
+			<label kind="assignment" x="1071" y="348">move(),
+c = 0</label>
+			<nail x="1020" y="340"/>
+			<nail x="1071" y="340"/>
+		</transition>
+		<transition id="id23">
+			<source ref="id10"/>
+			<target ref="id10"/>
+			<label kind="guard" x="552" y="17">c &gt;= speed</label>
+			<label kind="assignment" x="697" y="0">move(),
+c = 0</label>
+			<nail x="688" y="42"/>
+			<nail x="637" y="42"/>
+		</transition>
+		<transition id="id24">
+			<source ref="id9"/>
+			<target ref="id9"/>
+			<label kind="guard" x="178" y="17">c &gt;= speed</label>
+			<label kind="assignment" x="306" y="0">move(),
+c = 0</label>
+			<nail x="297" y="42"/>
+			<nail x="246" y="42"/>
+		</transition>
+	</template>
 	<system>// Place template instantiations here.
 Process = Template();
 // List one or more processes to be composed into a system.
