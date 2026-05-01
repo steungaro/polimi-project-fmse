@@ -70,28 +70,28 @@ void move() {
     
     update_footprint(true);  // Draw new position
 }</declaration>
-		<location id="id0" x="-85" y="0">
-			<name x="-95" y="-34">Init</name>
+		<location id="id0" x="76" y="59">
+			<name x="66" y="25">Init</name>
 			<committed/>
 		</location>
-		<location id="id1" x="170" y="0">
-			<name x="160" y="-34">Driving</name>
-			<label kind="invariant" x="160" y="17">c &lt;= speed</label>
+		<location id="id1" x="331" y="59">
+			<name x="321" y="25">Driving</name>
+			<label kind="invariant" x="321" y="76">c &lt;= speed</label>
 		</location>
 		<init ref="id0"/>
 		<transition id="id2">
 			<source ref="id1"/>
 			<target ref="id1"/>
-			<label kind="guard" x="188" y="-59">c &gt;= speed</label>
-			<label kind="assignment" x="297" y="-25">move(),
+			<label kind="guard" x="349" y="0">c &gt;= speed</label>
+			<label kind="assignment" x="458" y="34">move(),
 c = 0</label>
-			<nail x="357" y="-51"/>
-			<nail x="357" y="25"/>
+			<nail x="518" y="8"/>
+			<nail x="518" y="84"/>
 		</transition>
 		<transition id="id3">
 			<source ref="id0"/>
 			<target ref="id1"/>
-			<label kind="assignment" x="-68" y="8">current_x = start_x,
+			<label kind="assignment" x="93" y="67">current_x = start_x,
 update_footprint(true),
 c = 0</label>
 		</transition>
@@ -236,7 +236,7 @@ void move() {
 			<label kind="invariant" x="34" y="68">c &lt;= speed &amp;&amp; timer &lt;= 100</label>
 		</location>
 		<location id="id10" x="663" y="102">
-			<name x="612" y="170">Diving</name>
+			<name x="688" y="76">Diving</name>
 			<label kind="invariant" x="561" y="127">c &lt;= speed &amp;&amp; timer &lt;= 5</label>
 		</location>
 		<location id="id11" x="1045" y="280">
@@ -336,6 +336,148 @@ c = 0</label>
 c = 0</label>
 			<nail x="297" y="42"/>
 			<nail x="246" y="42"/>
+		</transition>
+	</template>
+	<template>
+		<name>Frogger</name>
+		<parameter>const int start_x, const int start_y, const int initial_lives, const int wait_time, const int move_delay, const int time_limit</parameter>
+		<declaration>clock move_timer; // To enforce the 1-unit delay between moves
+bool is_dead = false;
+
+// Helper to check if Frogger is in a lethal situation
+void check_safety() {
+    // Hit by a vehicle
+    if (danger[frog_x][frog_y]) {
+        is_dead = true;
+    }
+    // Drowning in the river (Rows 7-11)
+    if (frog_y &gt;= 7 &amp;&amp; frog_y &lt;= 11 &amp;&amp; !safe_platform[frog_x][frog_y]) {
+        is_dead = true;
+    }
+    // Game timeout (30 seconds = 300 units)
+    if (game_timer &gt;= INITIAL_TIMEOUT) {
+        is_dead = true;
+    }
+}
+
+
+// Checks if the X coordinate corresponds to a home bay and if it is free
+bool is_valid_bay(int x) {
+    // Check if X is within one of the 5 specific bay ranges
+    if (x &gt;= 0 &amp;&amp; x &lt;= 1) return !bay_occupied[0];
+    if (x &gt;= 4 &amp;&amp; x &lt;= 5) return !bay_occupied[1];
+    if (x &gt;= 8 &amp;&amp; x &lt;= 9) return !bay_occupied[2];
+    if (x &gt;= 12 &amp;&amp; x &lt;= 13) return !bay_occupied[3];
+    if (x &gt;= 16 &amp;&amp; x &lt;= 17) return !bay_occupied[4];
+    
+    // If X is in a green "wall" area (2-3, 6-7, etc.), it's not a valid bay
+    return false; 
+}
+
+void respawn() {
+    frog_x = 9;
+    frog_y = 0;
+    is_dead = false;
+    game_timer = 0;
+    time_since_respawn = 0;
+}</declaration>
+		<location id="id25" x="-595" y="-8">
+			<name x="-605" y="-42">Init</name>
+			<label kind="invariant" x="-688" y="8">time_since_respwan &lt;= 20</label>
+		</location>
+		<location id="id26" x="-85" y="-8">
+			<label kind="invariant" x="-195" y="8">game_timer &lt;=INITIAL_TIMEOUT</label>
+		</location>
+		<location id="id27" x="-85" y="-8">
+			<name x="-144" y="-42">Playing</name>
+		</location>
+		<location id="id28" x="-85" y="-8">
+		</location>
+		<location id="id29" x="994" y="-17">
+			<name x="985" y="-51">Checking</name>
+			<committed/>
+		</location>
+		<location id="id30" x="-8" y="-450">
+			<name x="-18" y="-484">Dead</name>
+			<committed/>
+		</location>
+		<location id="id31" x="680" y="310">
+			<name x="671" y="323">Victory</name>
+			<committed/>
+		</location>
+		<location id="id32" x="1139" y="-459">
+			<name x="1129" y="-493">GameOver</name>
+		</location>
+		<init ref="id25"/>
+		<transition id="id33">
+			<source ref="id31"/>
+			<target ref="id32"/>
+			<label kind="guard" x="935" y="280">home_bays_filled == 5</label>
+			<label kind="assignment" x="960" y="314">lives += 1oo</label>
+			<nail x="1147" y="306"/>
+		</transition>
+		<transition id="id34">
+			<source ref="id30"/>
+			<target ref="id32"/>
+			<label kind="guard" x="586" y="-484">lives == 1</label>
+			<label kind="assignment" x="586" y="-450">lives = 0</label>
+		</transition>
+		<transition id="id35">
+			<source ref="id27"/>
+			<target ref="id30"/>
+			<label kind="guard" x="-306" y="-187">game_timer &gt;= INITIAL_TIMEOUT ||
+danger[frog_x][frog_y] ||
+(frog_y &gt;= 7 &amp;&amp; frog_y &lt;= 11 &amp;&amp; !safe_platform[frog_x][frog_y])</label>
+			<label kind="synchronisation" x="-42" y="-221">die?</label>
+			<label kind="assignment" x="-68" y="-119">is_dead = true</label>
+		</transition>
+		<transition id="id36">
+			<source ref="id31"/>
+			<target ref="id25"/>
+			<label kind="guard" x="-373" y="274">home_bays_filled &lt; 5</label>
+			<label kind="assignment" x="-374" y="314">bay_occupied[get_bay_index(frog_x)] = true,
+home_bays_filled++,
+score += 5,
+respawn()</label>
+			<nail x="-391" y="306"/>
+		</transition>
+		<transition id="id37">
+			<source ref="id30"/>
+			<target ref="id25"/>
+			<label kind="guard" x="-306" y="-306">lives &gt; 1</label>
+			<label kind="assignment" x="-255" y="-263">lives--,
+respawn()</label>
+		</transition>
+		<transition id="id38">
+			<source ref="id29"/>
+			<target ref="id27"/>
+			<label kind="guard" x="-178" y="195">frog_y &lt; 12 &amp;&amp; !danger[frog_x][frog_y] &amp;&amp; (frog_y &lt; 7 || safe_platform[frog_x][frog_y])</label>
+			<nail x="178" y="195"/>
+		</transition>
+		<transition id="id39">
+			<source ref="id29"/>
+			<target ref="id31"/>
+			<label kind="guard" x="824" y="161">frog_y == 12</label>
+		</transition>
+		<transition id="id40">
+			<source ref="id29"/>
+			<target ref="id30"/>
+			<label kind="guard" x="357" y="-204">danger[frog_x][frog_y] ||
+(frog_y &gt;= 7 &amp;&amp; frog_y &lt;= 11 &amp;&amp; !safe_platform[frog_x][frog_y])</label>
+			<label kind="assignment" x="569" y="-153">id_dead = true</label>
+		</transition>
+		<transition id="id41">
+			<source ref="id26"/>
+			<target ref="id29"/>
+			<label kind="guard" x="76" y="-42">move_timer &gt;= 10 &amp;&amp; (frog_y &lt; 11 || (frog_y == 11 &amp;&amp; is_valid_bay(frog_x)))</label>
+			<label kind="assignment" x="374" y="0">frog_y++,
+score++,
+move_timer = 0</label>
+		</transition>
+		<transition id="id42">
+			<source ref="id25"/>
+			<target ref="id26"/>
+			<label kind="guard" x="-382" y="-34">time_since_respawn &gt;= 20</label>
 		</transition>
 	</template>
 	<system>// Place template instantiations here.
