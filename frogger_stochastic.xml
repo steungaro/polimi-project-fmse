@@ -1,58 +1,1944 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.6//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_6.dtd'>
 <nta>
-	<declaration>// MAP BOUNDARIES
-const int MAX_X = 17; // The rightmost cell boundary.
-const int MAX_Y = 12; // The topmost cell boundary (home bays).
-const int MIN_X = 0; // The leftmost boundary.
-const int MIN_Y = 0; // The bottommost boundary.
+	<declaration>/*** MAP BOUNDARIES &amp; CONSTANTS ***/
+const int MAX_X = 17;         // Rightmost boundary
+const int MAX_Y = 12;         // Upmost bboundary (home bays)
+const int INITIAL_X = 9;      // Initial x coordinate (could be theoretically set to any valid value)
+const int INITIAL_Y = 0;      // Initial y coordinate (could be theoretically set to any empty row)
 
-// INITIAL TIMEOUT
-const int INITIAL_TIMEOUT = 300;
+/*** TIMERS (1 time unit = 0.1s) ***/
+const int INITIAL_TIMEOUT = 300;     // 30s game timer
+const int TIMEOUT_REDUCTION = 20;    // 2s reduction for level
+const int RESPAWN_DELAY = 20;        // 2s initial delay    
+const int MOVE_DELAY = 1;            // 1s inter-move delaay to prevent Zeno behaviour
+const int MAX_OBJECT_SPEED = 10;     // Maximum speed for any object
+const int EMERGED_TIME = 100;        // 10s emerged time for diving turtles
+const int SUBMERGING_TIME = 50;      // 5s submerging time for diving turtles
+const int SUBMERGED_TIME = 100;      // 10s submerged time for diving turtles
+const int EMERGING_TIME = 50;        // 5s emerging time for diving turtles
+const int TOTAL_DIVE_CYCLE = EMERGED_TIME + SUBMERGING_TIME + SUBMERGED_TIME + EMERGING_TIME;
 
-// FROG
-int[0, MAX_X] frog_x = 9; // Frogger's current X position.
-int[0, MAX_Y] frog_y = 0; // Frogger's current Y position.
-int[-1, 1] frog_dir_x = 0; // (For the Stochastic version) the direction Frogger intends to move.
-int[-1, 1] frog_dir_y = 0; // (For the Stochastic version) the direction Frogger intends to move.
+/*** SCORING ***/
+const int MOVE_SCORE = 1;
+const int BAY_FILLED_SCORE = 5;
+const int LEVEL_WON_SCORE = 100;
+const int LIVES = 5;
 
-// GAME PROGRESSION
-int[0, 5] lives = 5; // The player starts with 5 lives.
-int score = 0; // Total points scored.
-int level = 1; // Current game level.
-int[0, 5] home_bays_filled = 0; // Tracks how many of the 5 bays are occupied.
-bool bay_occupied[5]; // An array tracking which specific bays are filled (Indices 0 to 4 mapping to the 5 home bay pairs).
+/*** DIRECTIONS ***/
+typedef int[0, 3] Direction;
+const Direction UP = 0;
+const Direction DOWN = 1;
+const Direction LEFT = 2;
+const Direction RIGHT = 3;
 
-// CLOCK
-clock game_timer; // Tracks the 30-second (or less) countdown.
-clock time_since_respawn; // Tracks the 2 seconds (20 units) Frogger must wait before moving after dying or scoring.
+/*** STRATEGY SELECTOR ***/
+/* 
+ * SMC NOTE: This array-based selector allows the verifier to test multiple 
+ * probabilistic weight distributions without altering the underlying automata.
+ * STRATEGY_SMART (2) also enables a heuristic look-ahead guard in attempt_move().
+ */
+// Define strategy IDs
+const int STRATEGY_BASELINE = 0; // 5-2-2-1 (Blind Random Walk)
+const int STRATEGY_WEIGHTS  = 1; // 8-1-1-0 (Blind Forward Bias)
+const int STRATEGY_SMART    = 2; // 8-1-1-0 (Forward Bias + Hazard Radar)
 
-// DANGER ZONES
-bool danger[MAX_X + 1][MAX_Y + 1]; // Vehicles update their current footprint to true here. If Frogger is on a true tile, he dies.
-bool safe_platform[MAX_X + 1][MAX_Y + 1]; // Logs and Turtles update their footprint here. If Frogger is in the river (Y = 7 to 11) and this is false, he drowns.
+// ---&gt; SET ACTIVE STRATEGY &lt;---
+const int ACTIVE_STRATEGY = STRATEGY_SMART;
 
-// CHANNELS
-broadcast chan jump; // Triggered when Frogger decides to move.
-broadcast chan die; // Triggered when Frogger touches a vehicle, submerging turtle, or drowns.
-broadcast chan score_bay; // Triggered when Frogger lands in an empty home bay.
-broadcast chan new_level; // Triggered when home_bays_filled == 5.</declaration>
+// Map the weights to the strategies [Baseline, Weights, Smart]
+const int arr_up_weight[3]    = {5, 8, 8};
+const int arr_left_weight[3]  = {2, 1, 1};
+const int arr_right_weight[3] = {2, 1, 1};
+const int arr_down_weight[3]  = {1, 0, 0};
+
+/*** WEIGHT OF MOVEMENTS ***/
+// UPPAAL will automatically assign these based on the ACTIVE_STRATEGY selected above
+const int UP_WEIGHT    = arr_up_weight[ACTIVE_STRATEGY];
+const int DOWN_WEIGHT  = arr_down_weight[ACTIVE_STRATEGY];
+const int LEFT_WEIGHT  = arr_left_weight[ACTIVE_STRATEGY];
+const int RIGHT_WEIGHT = arr_right_weight[ACTIVE_STRATEGY];
+
+
+/*** FROGGER VARIABLES ***/
+// Frogger coordinates
+int[-1, MAX_X + 1] frog_x = INITIAL_X;
+int[-1, MAX_Y + 1] frog_y = INITIAL_Y;
+
+// Lives, score and home bays
+int[0, LIVES] lives = LIVES;
+int score = 0;
+int[0, 5] home_bays_filled = 0;
+bool bay_occupied[5] = {false, false, false, false, false};
+
+/*** CHANNELS ***/
+urgent broadcast chan die; // Sender: GameEngine -- Receiver: Frogger
+
+/*** CONFIGURATION BLUEPRINTS ***/
+
+// Generic moving entity configuration (vehicle/log/turtle)
+typedef struct {
+    int size;
+    int speed; // This is used as 1/speed rate of exponential for Trucks
+    bool is_diving;
+} EntityConfig;
+
+// Types of vehicles (can be theoretically initialized with different values, as long as speed &lt;= MAX_OBJECT_SPEED)
+const EntityConfig ORANGE  = {1, 3, false};
+const EntityConfig DOZER   = {1, 10, false};
+const EntityConfig GREEN   = {1, 5, false};
+const EntityConfig PURPLE  = {1, 4, false};
+const EntityConfig TRUCK   = {2, 7, false};
+
+// Types of floatings (can be theoretically initialized with different values, as long as speed &lt;= MAX_OBJECT_SPEED)
+const EntityConfig LOG_S   = {3, 2, false};
+const EntityConfig LOG_M   = {9, 7, false};
+const EntityConfig LOG_L   = {5, 2, false};
+const EntityConfig DIVT_3  = {5, 6, true};  // 3 diving turtles (total 5 spaces)
+const EntityConfig DIVT_2  = {3, 2, true};  // 2 diving turtles (total 3 spaces)
+const EntityConfig TURT_3  = {5, 6, false}; // 3 turtles (total 5 spaces)
+const EntityConfig TURT_2  = {3, 2, false}; // 2 turtles (total 5 spaces)
+
+/*** ACTIVE ENTITIES ***/
+
+// Entity
+typedef struct {
+    int[-1, MAX_X + 1] x;
+    int[0, MAX_Y] y;
+    int[0, MAX_OBJECT_SPEED] move_timer;
+    int[0, TOTAL_DIVE_CYCLE] dive_timer;
+    bool submerged;
+    EntityConfig type; 
+} ActiveEntity;
+
+// Number of vehicles and floats (can be edited as long as enough vehicles and floats are then used)
+const int NUM_VEHICLES = 12;
+const int NUM_FLOATS = 10;
+
+ActiveEntity vehicles[NUM_VEHICLES] = {
+    {4, 1, 0, 0, false, ORANGE}, {14, 1, 0, 0, false, ORANGE},     
+    {2, 2, 0, 0, false, DOZER}, {11, 2, 0, 0, false, DOZER},       
+    {4, 3, 0, 0, false, GREEN}, {8, 3, 0, 0, false, GREEN}, {13, 3, 0, 0, false, GREEN}, {17, 3, 0, 0, false, GREEN}, 
+    {2, 4, 0, 0, false, PURPLE}, {10, 4, 0, 0, false, PURPLE},     
+    {4, 5, 0, 0, false, TRUCK}, {15, 5, 0, 0, false, TRUCK}        
+};
+
+ActiveEntity floats[NUM_FLOATS] = {
+    {5, 7, 0, 0, false, TURT_3}, {13, 7, 0, 0, false, DIVT_3},                             
+    {7, 8, 0, 0, false, LOG_S}, {11, 8, 0, 0, false, LOG_S}, {15, 8, 0, 0, false, LOG_S},    
+    {3, 9, 0, 0, false, LOG_M},                                                        
+    {2, 10, 0, 0, false, TURT_2}, {10, 10, 0, 0, false, DIVT_2},                        
+    {1, 11, 0, 0, false, LOG_L}, {1, 11, 0, 0, false, LOG_L}                            
+};
+
+
+/*** GAME LOGIC FUNCTIONS ***/
+
+/**
+ * @brief Centralized game engine tick. Updates all vehicles and floats based on their 
+ *        individual speed timers. Handles continuous movement, torus wrapping for 
+ *        entities and Frogger, and dive timer progression for turtles.
+ * @param None
+ * @return void
+ */
+void update_game() {
+    int i;
+    
+    // VEHICLE MOVEMENT
+    for (i = 0; i &lt; NUM_VEHICLES; i++) {
+        // Skip Trucks for SMC; they use their own stochastic template
+        if (vehicles[i].type.size != TRUCK.size) {
+            vehicles[i].move_timer++;
+            if (vehicles[i].move_timer &gt;= vehicles[i].type.speed) {
+                
+                if (vehicles[i].y % 2 != 0) { // Right to Left
+                    if (vehicles[i].x == -1) vehicles[i].x = MAX_X + 1; 
+                    else vehicles[i].x--;
+                } else { // Left to Right
+                    if (vehicles[i].x == MAX_X + 1) vehicles[i].x = -1; 
+                    else vehicles[i].x++;
+                }
+                
+                vehicles[i].move_timer = 0; // Reset safely
+            }
+        }
+    }
+    
+    // FLOATINGS MOVEMENT
+    for (i = 0; i &lt; NUM_FLOATS; i++) {
+        floats[i].move_timer++;
+        
+        // MOVEMENT &amp; CARRYING FROGGER
+        if (floats[i].move_timer &gt;= floats[i].type.speed) {
+            int dist = (frog_x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
+            bool carrying = (frog_y == floats[i].y &amp;&amp; dist &lt; floats[i].type.size);
+
+            if (floats[i].y == 8 || floats[i].y == 9 || floats[i].y == 11) { // Left to Right
+                // Move Log
+                if (floats[i].x == MAX_X + 1) floats[i].x = -1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x++;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == MAX_X + 1) frog_x = -1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x++;
+                }
+            } else { // Right to Left
+                // Move Log
+                if (floats[i].x == -1) floats[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x--;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == -1) frog_x = MAX_X + 1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x--;
+                }
+            }
+            floats[i].move_timer = 0; // Reset movement timer
+        }
+
+        // DIVING LOGIC
+        if (floats[i].type.is_diving) {
+            floats[i].dive_timer++;
+            floats[i].submerged = (floats[i].dive_timer &gt; (SUBMERGING_TIME + EMERGED_TIME) &amp;&amp; floats[i].dive_timer &lt; TOTAL_DIVE_CYCLE);
+            if (floats[i].dive_timer &gt;= TOTAL_DIVE_CYCLE) floats[i].dive_timer = 0; // Reset dive cycle
+        }
+    }
+}
+
+/**
+ * @brief Evaluates if a vehicle occupies a specific coordinate on the map.
+ *        Uses parameterized modulo arithmetic to safely evaluate wrapped coordinates 
+ *        on the Torus ring, supporting vehicles of any size across the map boundaries.
+ * @param x The x-coordinate to evaluate.
+ * @param y The y-coordinate to evaluate.
+ * @return true if a vehicle occupies the cell, false otherwise.
+ */
+bool vehicle_at(int x, int y) {
+    int i;
+    for (i = 0; i &lt; NUM_VEHICLES; i++) {
+        if (vehicles[i].y == y) {
+            int dist = (x - vehicles[i].x + (MAX_X + 3)) % (MAX_X + 3);
+            if (dist &lt; vehicles[i].type.size) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Evaluates if a valid, non-submerged floating platform exists at a specific coordinate.
+ *        Uses parameterized modulo arithmetic to safely evaluate wrapped coordinates on the Torus ring.
+ * @param x The x-coordinate to evaluate.
+ * @param y The y-coordinate to evaluate.
+ * @return true if a safe platform occupies the cell, false otherwise.
+ */
+bool platform_at(int x, int y) {
+    int i;
+    for (i = 0; i &lt; NUM_FLOATS; i++) {
+        if (!floats[i].submerged &amp;&amp; floats[i].y == y) {
+            int dist = (x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
+            if (dist &lt; floats[i].type.size) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Determines if Frogger's current y-coordinate places him inside the river zone.
+ * @param None
+ * @return true if Frogger is in the river, false otherwise.
+ */
+bool is_in_river() {
+    return (frog_y &gt;= 7 &amp;&amp; frog_y &lt;= 11);
+}
+
+/**
+ * @brief Comprehensive safety check. Determines if Frogger's exact position triggers a death condition
+ *        (hit by vehicle, drowning in river without a platform, or smashing into the wall between bays).
+ * @param None
+ * @return true if the current position is lethal, false if safe.
+ */
+bool is_deadly() {
+    if (vehicle_at(frog_x, frog_y)) return true;
+    if (is_in_river() &amp;&amp; !platform_at(frog_x, frog_y)) return true;    
+    if (frog_y == MAX_Y &amp;&amp; (frog_x % 4 &gt;= 2)) return true;
+    return false;
+}
+
+/*** STATISTICAL TRACKERS ***/
+/*
+ * SMC NOTE: These variables do not affect game logic. They act as telemetry 
+ * trackers to calculate expected values (E[&lt;=1000]) for death causes and progression.
+ */
+int stat_hit_by_vehicle = 0;
+int stat_drowned = 0;
+int stat_timeout = 0;
+int stat_total_lifespan = 0;</declaration>
 	<template>
-		<name x="5" y="5">Template</name>
-		<declaration>// Place local declarations here.
-</declaration>
-		<location id="id0" x="0" y="0">
+		<name>Truck</name>
+		<parameter>const int id</parameter>
+		<declaration>/**
+ * @brief Updates the stochastic truck's position.
+ *        Trucks are located on Row 5 (an odd row), so they move Right to Left.
+ *        Wraps around using the corrected [-1, MAX_X + 1] Torus boundary.
+ * @param None
+ * @return void
+ */
+void update_truck() {
+    // Right-to-Left movement with the updated 2-space Torus delay
+    if (vehicles[id].x == -1) {
+        vehicles[id].x = MAX_X + 1; 
+    } else {
+        vehicles[id].x--;
+    }
+}</declaration>
+		<location id="id0" x="0" y="0" color="#00ff00">
+			<name x="-25" y="17">Driving</name>
+			<label kind="exponentialrate" x="-25" y="-34">1:vehicles[id].type.speed</label>
+			<label kind="comments" x="-229" y="161">Driving: Active movement state. Utilizes an exponential rate (1:vehicles[id].type.speed)
+to trigger the stochastic transition. This simulates variable-speed, continuous
+movement independent of the central discrete clock.</label>
 		</location>
 		<init ref="id0"/>
+		<transition id="id1">
+			<source ref="id0"/>
+			<target ref="id0"/>
+			<label kind="assignment" x="-51" y="102">update_truck()</label>
+			<label kind="comments" x="-229" y="229">Driving -&gt; Driving: Stochastic movement trigger. Executes update_truck() to advance the
+vehicle's position and handle Torus wrapping.</label>
+			<nail x="68" y="0"/>
+			<nail x="68" y="102"/>
+			<nail x="-59" y="102"/>
+			<nail x="-59" y="0"/>
+		</transition>
 	</template>
-	<system>// Place template instantiations here.
-Process = Template();
-// List one or more processes to be composed into a system.
-system Process;
-</system>
+	<template>
+		<name>GameEngine</name>
+		<declaration>clock t;</declaration>
+		<location id="id2" x="0" y="0" color="#00ff00">
+			<name x="-76" y="-25">Active</name>
+			<label kind="invariant" x="-76" y="0">t &lt;= 1</label>
+			<label kind="comments" x="-348" y="161">Active State: Passively tracks time up to 1 unit (0.1s). Acts as the primary delay state between physics updates.</label>
+		</location>
+		<location id="id3" x="306" y="0" color="#ffa500">
+			<name x="314" y="-25">Evaluating</name>
+			<label kind="comments" x="-348" y="195">Evaluating State: Freezes time to atomically resolve collisions immediately after a physics update. Guarantees hazard detection before time advances.</label>
+			<committed/>
+		</location>
+		<init ref="id2"/>
+		<transition id="id4">
+			<source ref="id3"/>
+			<target ref="id2"/>
+			<label kind="guard" x="102" y="68">is_deadly()</label>
+			<label kind="synchronisation" x="102" y="93">die!</label>
+			<label kind="comments" x="-348" y="297">Evaluating -&gt; Active (#2): Hazard detected on Frogger's exact coordinates. Actively pushes the 'die!' interrupt to kill Frogger while time is paused.</label>
+			<nail x="306" y="93"/>
+			<nail x="0" y="93"/>
+		</transition>
+		<transition id="id5">
+			<source ref="id3"/>
+			<target ref="id2"/>
+			<label kind="guard" x="93" y="-118">!is_deadly()</label>
+			<label kind="comments" x="-348" y="263">Evaluating -&gt; Active (#1): Frogger's current coordinates are safe. The engine returns to the passive wait state.</label>
+			<nail x="306" y="-93"/>
+			<nail x="0" y="-93"/>
+		</transition>
+		<transition id="id6">
+			<source ref="id2"/>
+			<target ref="id3"/>
+			<label kind="guard" x="17" y="-25">t &gt;= 1</label>
+			<label kind="assignment" x="170" y="-42">t = 0,
+update_game()</label>
+			<label kind="comments" x="-348" y="229">Active -&gt; Evaluating: Triggers the physics update. Resets the engine clock 't' and advances all vehicle/float arrays by one tick.</label>
+			<nail x="110" y="0"/>
+		</transition>
+	</template>
+	<template>
+		<name>Frogger</name>
+		<declaration>clock game_timer;            
+clock move_timer;    
+int level = 1;
+int current_timeout = INITIAL_TIMEOUT;
+
+/**
+ * @brief Resets Frogger to his starting coordinates at the bottom center of the map.
+ *        Called upon initialization and after losing a life or scoring.
+ * @param None
+ * @return void
+ */
+void reposition() {
+    frog_x = INITIAL_X;
+    frog_y = INITIAL_Y;
+}
+
+/**
+ * @brief Checks if Frogger is currently positioned safely inside an empty home bay.
+ * @param None
+ * @return true if Frogger occupies a home bay cell, false otherwise.
+ */
+bool is_home_bay() {
+    return (frog_y == MAX_Y &amp;&amp; (frog_x % 4 &lt; 2));
+}
+
+/**
+ * @brief Executes a probabilistic movement attempt by Frogger.
+ *        Moves into the wall between bays are allowed so the state engine can 
+ *        properly process the death condition via is_deadly().
+ * @param dir The direction Frogger is attempting to move (UP, DOWN, LEFT, RIGHT).
+ * @return void
+ */
+void attempt_move(Direction dir) {
+    int new_x = frog_x;
+    int new_y = frog_y;
+
+    // Constraint: Cannot move voluntarily if currently in the off-screen wrap zone
+    if (frog_x &lt; 0 || frog_x &gt; MAX_X) return;
+
+    if (dir == UP) new_y++;
+    if (dir == DOWN) new_y--;
+    if (dir == LEFT) new_x--;
+    if (dir == RIGHT) new_x++;
+
+    // --- STRATEGY: HEURISTIC AWARENESS ---
+    if (ACTIVE_STRATEGY == STRATEGY_SMART) {
+        // Do not jump if a car is currently occupying the destination
+        if (vehicle_at(new_x, new_y)) return;
+        
+        // Do not jump if destination is the river AND there is no platform there
+        if (new_y &gt;= 7 &amp;&amp; new_y &lt;= 11 &amp;&amp; !platform_at(new_x, new_y)) return;
+    }
+
+    // Constraint: Can only jump within visible map boundaries
+    if (new_x &gt;= 0 &amp;&amp; new_x &lt;= MAX_X &amp;&amp; new_y &gt;= 0 &amp;&amp; new_y &lt;= MAX_Y) {
+        
+        // Constraint: Prevent jumping into an already occupied home bay
+        if (new_y == MAX_Y &amp;&amp; (new_x % 4 &lt; 2) &amp;&amp; bay_occupied[new_x / 4]) {
+            return; // Move blocked
+        }
+        
+        // Apply the verified move
+        frog_x = new_x;
+        frog_y = new_y;
+        
+        // Score is only awarded for forward progress
+        if (dir == UP) score += MOVE_SCORE; 
+    }
+}
+
+/**
+ * @brief Handles the transition to a new level. Awards points, increments the level,
+ *        reduces the global timeout, clears all home bays, and resets Frogger.
+ * @param None
+ * @return void
+ */
+void complete_level() {
+    int i;
+    score += LEVEL_WON_SCORE;
+    level++;
+    
+    // Calculate new timeout: 30s - 2s*(level-1)
+    current_timeout = INITIAL_TIMEOUT - (TIMEOUT_REDUCTION * (level - 1));
+    
+    // Safety cap: Prevent the timeout from dropping below 2 seconds
+    if (current_timeout &lt; 20) current_timeout = 20; 
+    
+    // Clear all home bays
+    for (i = 0; i &lt; 5; i++) {
+        bay_occupied[i] = false;
+    }
+    home_bays_filled = 0;
+    
+    reposition();
+}
+
+/**
+ * @brief Identifies the exact cause of death and increments the telemetry trackers.
+ *        Called when reaching the 'Dead' state.
+ * @param None
+ * @return void
+ */
+void record_death_cause() {
+    /* 
+     * SMC NOTE: game_timer is a continuous clock. UPPAAL strictly forbids adding 
+     * continuous clocks to discrete integers. fint() is used to cast the float 
+     * value to an integer before addition.
+     */
+    stat_total_lifespan += fint(game_timer);
+    
+    if (vehicle_at(frog_x, frog_y)) {
+        stat_hit_by_vehicle++;
+    } else if (is_in_river() &amp;&amp; !platform_at(frog_x, frog_y)) {
+        stat_drowned++;
+    }
+}</declaration>
+		<location id="id7" x="-960" y="-8" color="#00ff00">
+			<name x="-970" y="-42">GameStart</name>
+			<label kind="comments" x="-977" y="510">GameStart: Initializes the game. Committed to ensure Frogger is repositioned atomically at t=0.</label>
+			<committed/>
+		</location>
+		<location id="id8" x="-467" y="-8" color="#ffa500">
+			<name x="-450" y="-34">Waiting</name>
+			<label kind="invariant" x="-714" y="-8">move_timer &lt;= RESPAWN_DELAY</label>
+			<label kind="comments" x="-977" y="544">Waiting: Locks Frogger in the starting bay for the duration of RESPAWN_DELAY. Simulates the arcade respawn animation/pause.</label>
+		</location>
+		<location id="id9" x="76" y="-8" color="#00ff00">
+			<name x="93" y="-34">Playing</name>
+			<label kind="invariant" x="-178" y="-8">move_timer &lt;= 1 &amp;&amp; 
+game_timer &lt;= current_timeout</label>
+			<label kind="comments" x="-977" y="578">Playing: The core active state. Constrained by the level's timeout invariant. Frogger remains here between discrete jumps.</label>
+		</location>
+		<location id="id10" x="748" y="-8" color="#ffa500">
+			<name x="765" y="-34">CheckState</name>
+			<label kind="comments" x="-977" y="612">CheckState: Freezes time instantly upon a jump execution to evaluate if the new destination is safe, deadly, or a scoring bay.</label>
+			<committed/>
+		</location>
+		<location id="id11" x="76" y="-221" color="#ff0000">
+			<name x="93" y="-246">Dead</name>
+			<label kind="comments" x="-977" y="646">Dead: Intermediate state for processing a life loss. Atomically evaluates whether to trigger a respawn or GameOver.</label>
+			<committed/>
+		</location>
+		<location id="id12" x="76" y="204" color="#0000ff">
+			<name x="93" y="178">Scored</name>
+			<label kind="comments" x="-977" y="680">Scored: Intermediate state for processing a successful run. Atomically adds points and evaluates whether the game is won.</label>
+			<committed/>
+		</location>
+		<location id="id13" x="-459" y="-331" color="#000000">
+			<name x="-442" y="-357">GameOver</name>
+		</location>
+		<branchpoint id="id14" x="331" y="-8"/>
+		<init ref="id7"/>
+		<transition id="id15">
+			<source ref="id12"/>
+			<target ref="id8"/>
+			<label kind="guard" x="-450" y="272">home_bays_filled == 5</label>
+			<label kind="assignment" x="-449" y="297">complete_level(),
+move_timer = 0</label>
+			<nail x="-204" y="204"/>
+			<nail x="-204" y="297"/>
+			<nail x="-467" y="297"/>
+		</transition>
+		<transition id="id16">
+			<source ref="id14"/>
+			<target ref="id10"/>
+			<label kind="assignment" x="527" y="-42">attempt_move(LEFT)</label>
+			<label kind="probability" x="340" y="-42">LEFT_WEIGHT</label>
+			<nail x="331" y="-25"/>
+			<nail x="697" y="-25"/>
+			<nail x="697" y="-8"/>
+		</transition>
+		<transition id="id17">
+			<source ref="id14"/>
+			<target ref="id10"/>
+			<label kind="assignment" x="527" y="42">attempt_move(DOWN)</label>
+			<label kind="probability" x="340" y="42">DOWN_WEIGHT</label>
+			<nail x="331" y="42"/>
+			<nail x="697" y="42"/>
+			<nail x="697" y="-8"/>
+		</transition>
+		<transition id="id18">
+			<source ref="id14"/>
+			<target ref="id10"/>
+			<label kind="assignment" x="527" y="-68">attempt_move(UP)</label>
+			<label kind="probability" x="340" y="-68">UP_WEIGHT</label>
+			<nail x="331" y="-51"/>
+			<nail x="697" y="-51"/>
+			<nail x="697" y="-8"/>
+		</transition>
+		<transition id="id19">
+			<source ref="id14"/>
+			<target ref="id10"/>
+			<label kind="assignment" x="527" y="8">attempt_move(RIGHT)</label>
+			<label kind="probability" x="340" y="8">RIGHT_WEIGHT</label>
+			<nail x="331" y="8"/>
+			<nail x="697" y="8"/>
+			<nail x="697" y="-8"/>
+		</transition>
+		<transition id="id20" controllable="false">
+			<source ref="id9"/>
+			<target ref="id14"/>
+			<label kind="guard" x="170" y="-34">move_timer &gt;= 1</label>
+			<label kind="assignment" x="170" y="-8">move_timer = 0</label>
+			<label kind="comments" x="-977" y="748">Playing -&gt; CheckState: Stochastic decision node. UPPAAL rolls the probabilistic weights (UP, DOWN, LEFT, RIGHT) defined in the Strategy Selector to dictate the movement direction.</label>
+			<nail x="246" y="-8"/>
+		</transition>
+		<transition id="id21">
+			<source ref="id9"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-25" y="-144">die?</label>
+			<label kind="assignment" x="-153" y="-127">record_death_cause()</label>
+			<label kind="comments" x="-977" y="816">Playing -&gt; Dead (#1): Asynchronous interrupt. The environment crushed or drowned Frogger while he was standing still.</label>
+			<nail x="76" y="-85"/>
+			<nail x="17" y="-85"/>
+			<nail x="17" y="-161"/>
+			<nail x="76" y="-161"/>
+		</transition>
+		<transition id="id22">
+			<source ref="id11"/>
+			<target ref="id13"/>
+			<label kind="guard" x="-17" y="-357">lives == 0</label>
+			<nail x="76" y="-331"/>
+		</transition>
+		<transition id="id23">
+			<source ref="id12"/>
+			<target ref="id8"/>
+			<label kind="guard" x="-450" y="178">home_bays_filled &lt; 5</label>
+			<label kind="assignment" x="-449" y="204">reposition(),
+move_timer = 0</label>
+			<nail x="-467" y="204"/>
+		</transition>
+		<transition id="id24">
+			<source ref="id11"/>
+			<target ref="id8"/>
+			<label kind="guard" x="-450" y="-246">lives &gt; 0</label>
+			<label kind="assignment" x="-449" y="-221">lives--, reposition(),
+move_timer = 0</label>
+			<nail x="-467" y="-221"/>
+		</transition>
+		<transition id="id25">
+			<source ref="id10"/>
+			<target ref="id9"/>
+			<label kind="guard" x="297" y="110">!is_home_bay() &amp;&amp;
+!is_deadly()</label>
+			<label kind="comments" x="-977" y="782">CheckState -&gt; Playing: Destination is an empty road or safe platform. Returns control to the player.</label>
+			<nail x="748" y="102"/>
+			<nail x="76" y="102"/>
+		</transition>
+		<transition id="id26">
+			<source ref="id10"/>
+			<target ref="id12"/>
+			<label kind="guard" x="297" y="212">is_home_bay() &amp;&amp; !is_deadly()</label>
+			<label kind="assignment" x="297" y="238">score += BAY_FILLED_SCORE,
+bay_occupied[frog_x / 4] = true,
+home_bays_filled++</label>
+			<label kind="comments" x="-1053" y="994">CheckState -&gt; Scored: Success. The player accurately jumped into an empty home bay</label>
+			<nail x="748" y="102"/>
+			<nail x="748" y="212"/>
+		</transition>
+		<transition id="id27">
+			<source ref="id10"/>
+			<target ref="id11"/>
+			<label kind="guard" x="646" y="-246">is_deadly()</label>
+			<label kind="assignment" x="578" y="-221">record_death_cause()</label>
+			<label kind="comments" x="-977" y="918">CheckState -&gt; Deadly: Active suicide. The player jumped directly into a hazard or into the water without a log.</label>
+			<nail x="748" y="-221"/>
+		</transition>
+		<transition id="id28">
+			<source ref="id9"/>
+			<target ref="id11"/>
+			<label kind="guard" x="144" y="-144">game_timer &gt;= current_timeout</label>
+			<label kind="assignment" x="144" y="-127">stat_timeout++</label>
+			<label kind="comments" x="-977" y="850">Playing -&gt; Dead (#2): Time Over. The player failed to reach a bay before the timer expired.</label>
+			<nail x="76" y="-85"/>
+			<nail x="136" y="-85"/>
+			<nail x="136" y="-161"/>
+			<nail x="76" y="-161"/>
+		</transition>
+		<transition id="id29">
+			<source ref="id8"/>
+			<target ref="id9"/>
+			<label kind="guard" x="-331" y="-34">move_timer &gt;= RESPAWN_DELAY</label>
+			<label kind="assignment" x="-331" y="-8">game_timer = 0,
+move_timer = 0</label>
+			<label kind="comments" x="-977" y="714">Waiting -&gt; Playing: Respawn delay complete. Unlocks Frogger's movement and resets the global stage timer.</label>
+		</transition>
+		<transition id="id30">
+			<source ref="id7"/>
+			<target ref="id8"/>
+			<label kind="assignment" x="-935" y="-8">reposition(),
+move_timer = 0</label>
+		</transition>
+	</template>
+	<system>// Instantiate the stochastic trucks (indices 10 and 11 in the vehicles array)
+Truck1 = Truck(10);
+Truck2 = Truck(11);
+
+// SMC System Initialization
+system Frogger, GameEngine, Truck1, Truck2;</system>
 	<queries>
 		<query>
-			<formula/>
-			<comment/>
+			<formula>Pr[&lt;=1000] (&lt;&gt; Frogger.level &gt; 1 &amp;&amp; score &gt;= 200)</formula>
+			<comment>Simulate the game for a maximum of 1000 time units and estimate the probability of completing the first level while scoring at least 200 points.</comment>
+			<result outcome="success" type="quantity" value="0.0412821 ± 0.0356734 (95% CI)" timestamp="2026-05-03 19:24:59 +0200">
+				<details>0.0412821 ± 0.0356734 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="run duration in time" yaxis="probability density">
+					<series title="density" type="b(188.500000)" color="0x0000ff" encoding="csv">504.0,9.558630248285421E-5
+692.5,0.0
+881.0,4.7793151241427105E-5
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,9.558630248285421E-5
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Density Confidence Intervals" xaxis="run duration in time" yaxis="probability density">
+					<series title="upper limit" type="b(188.500000)" color="0xa0a0ff" encoding="csv">504.0,0.0635733246051593
+692.5,0.03268699402394771
+881.0,0.0491734186115298
+					</series>
+					<series title="lower limit" type="b(188.500000)" color="0x0000ff" encoding="csv">504.0,0.0021895628264661576
+692.5,0.0
+881.0,2.2806235004637084E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,3.372590164729936E-4
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="run duration in time" yaxis="probability">
+					<series title="probability" type="b(188.500000)" color="0x0000ff" encoding="csv">504.0,0.018018018018018018
+692.5,0.0
+881.0,0.009009009009009009
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,0.018018018018018018
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
+					<series title="upper limit" type="b(188.500000)" color="0xa0a0ff" encoding="csv">504.0,0.0635733246051593
+692.5,0.03268699402394771
+881.0,0.0491734186115298
+					</series>
+					<series title="lower limit" type="b(188.500000)" color="0x0000ff" encoding="csv">504.0,0.0021895628264661576
+692.5,0.0
+881.0,2.2806235004637084E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,0.0635733246051593
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="run duration in time" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">504.0,0.0
+692.5,0.018018018018018018
+881.0,0.018018018018018018
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,0.027027027027026973
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">504.0,0.03268699402394771
+692.5,0.0635733246051593
+881.0,0.0635733246051593
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">504.0,0.0
+692.5,0.0021895628264661576
+881.0,0.0021895628264661576
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">504.0,0.0
+692.5,0.018018018018018018
+881.0,0.018018018018018018
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,0.027027027027026973
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="run duration in time" yaxis="count">
+					<series title="count" type="b(188.500000)" color="0x0000ff" encoding="csv">504.0,2.0
+692.5,0.0
+881.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">678.3333333333334,0.0
+678.3333333333334,2.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=188.5, bucket count=3
+Runs: 111 in total, 3 (2.7027%) displayed, 108 (97.297%) remaining
+Displayed sample set: { 881, 504, 650 }
+Mean estimate of displayed sample: 678 ± 472 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: score)</formula>
+			<comment>Maximum score in each game.</comment>
+			<result outcome="success" type="quantity" value="103.803 ± 2.52744 (95% CI)" timestamp="2026-05-03 19:25:12 +0200">
+				<details>103.803 ± 2.52744 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="max: score" yaxis="probability density">
+					<series title="density" type="b(9.000000)" color="0x0000ff" encoding="csv">16.0,2.2222222222222223E-4
+25.0,0.0
+34.0,4.4444444444444447E-4
+43.0,0.0022222222222222222
+52.0,0.0023333333333333335
+61.0,0.007
+70.0,0.008888888888888889
+79.0,0.014444444444444444
+88.0,0.017
+97.0,0.017
+106.0,0.01622222222222222
+115.0,0.012333333333333333
+124.0,0.006111111111111111
+133.0,8.888888888888889E-4
+142.0,0.0
+151.0,0.0
+160.0,0.0
+169.0,0.0
+178.0,0.0
+187.0,0.0
+196.0,0.0
+205.0,0.0
+214.0,2.2222222222222223E-4
+223.0,6.666666666666666E-4
+232.0,0.0014444444444444444
+241.0,5.555555555555556E-4
+250.0,0.001
+259.0,0.001
+268.0,5.555555555555556E-4
+277.0,4.4444444444444447E-4
+286.0,1.1111111111111112E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">103.803,0.0
+103.803,0.017
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=9, bucket count=31
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [16, 291]
+Mean estimate of displayed sample: 103.8 ± 2.5274 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: score" yaxis="probability">
+					<series title="probability" type="b(9.000000)" color="0x0000ff" encoding="csv">16.0,0.002
+25.0,0.0
+34.0,0.004
+43.0,0.02
+52.0,0.021
+61.0,0.063
+70.0,0.08
+79.0,0.13
+88.0,0.153
+97.0,0.153
+106.0,0.146
+115.0,0.111
+124.0,0.055
+133.0,0.008
+142.0,0.0
+151.0,0.0
+160.0,0.0
+169.0,0.0
+178.0,0.0
+187.0,0.0
+196.0,0.0
+205.0,0.0
+214.0,0.002
+223.0,0.006
+232.0,0.013
+241.0,0.005
+250.0,0.009
+259.0,0.009
+268.0,0.005
+277.0,0.004
+286.0,0.001
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">103.803,0.0
+103.803,0.153
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=9, bucket count=31
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [16, 291]
+Mean estimate of displayed sample: 103.8 ± 2.5274 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: score" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">16.0,0.0
+25.0,0.002
+34.0,0.002
+43.0,0.006
+52.0,0.026
+61.0,0.047
+70.0,0.11
+79.0,0.19
+88.0,0.32
+97.0,0.473
+106.0,0.626
+115.0,0.772
+124.0,0.883
+133.0,0.938
+142.0,0.946
+151.0,0.946
+160.0,0.946
+169.0,0.946
+178.0,0.946
+187.0,0.946
+196.0,0.946
+205.0,0.946
+214.0,0.946
+223.0,0.948
+232.0,0.954
+241.0,0.967
+250.0,0.972
+259.0,0.981
+268.0,0.99
+277.0,0.995
+286.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">103.803,0.0
+103.803,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=9, bucket count=31
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [16, 291]
+Mean estimate of displayed sample: 103.8 ± 2.5274 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: score" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">16.0,0.003682083896865672
+25.0,0.007205838911457498
+34.0,0.007205838911457498
+43.0,0.013013423270974498
+52.0,0.037865122478921445
+61.0,0.062012630693305155
+70.0,0.13105246363748774
+79.0,0.21571368885163367
+88.0,0.34991038185286666
+97.0,0.5044854160069695
+106.0,0.6560810897967033
+115.0,0.7976712701289689
+124.0,0.9022709975049333
+133.0,0.9521381518866388
+142.0,0.9591766488743693
+151.0,0.9591766488743693
+160.0,0.9591766488743693
+169.0,0.9591766488743693
+178.0,0.9591766488743693
+187.0,0.9591766488743693
+196.0,0.9591766488743693
+205.0,0.9591766488743693
+214.0,0.9591766488743693
+223.0,0.9609234650560196
+232.0,0.9661285014523221
+241.0,0.9771776166505405
+250.0,0.9813153138044625
+259.0,0.988522963006899
+268.0,0.9951944893089507
+277.0,0.9983745804824372
+286.0,0.9999746825125088
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">16.0,0.0
+25.0,2.4230111687723193E-4
+34.0,2.4230111687723193E-4
+43.0,0.0022049824851513773
+52.0,0.017052786345629425
+61.0,0.03473506226679596
+70.0,0.09127777445946614
+79.0,0.1661265075387875
+88.0,0.2911537108813487
+97.0,0.4416739674827332
+106.0,0.5951746333550648
+115.0,0.7447168224784332
+124.0,0.8614425336094167
+133.0,0.9212200503389675
+142.0,0.9301259944229326
+151.0,0.9301259944229326
+160.0,0.9301259944229326
+169.0,0.9301259944229326
+178.0,0.9301259944229326
+187.0,0.9301259944229326
+196.0,0.9301259944229326
+205.0,0.9301259944229326
+214.0,0.9301259944229326
+223.0,0.9323649859494927
+232.0,0.9391164472862573
+241.0,0.9539660181829768
+250.0,0.9597851126261567
+259.0,0.9704875983749022
+268.0,0.9816867569448875
+277.0,0.9883705294401879
+286.0,0.9944410757201734
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">16.0,0.0
+25.0,0.002
+34.0,0.002
+43.0,0.006
+52.0,0.026
+61.0,0.047
+70.0,0.11
+79.0,0.19
+88.0,0.32
+97.0,0.473
+106.0,0.626
+115.0,0.772
+124.0,0.883
+133.0,0.938
+142.0,0.946
+151.0,0.946
+160.0,0.946
+169.0,0.946
+178.0,0.946
+187.0,0.946
+196.0,0.946
+205.0,0.946
+214.0,0.946
+223.0,0.948
+232.0,0.954
+241.0,0.967
+250.0,0.972
+259.0,0.981
+268.0,0.99
+277.0,0.995
+286.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">103.803,0.0
+103.803,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=9, bucket count=31
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [16, 291]
+Mean estimate of displayed sample: 103.8 ± 2.5274 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: score" yaxis="count">
+					<series title="count" type="b(9.000000)" color="0x0000ff" encoding="csv">16.0,2.0
+25.0,0.0
+34.0,4.0
+43.0,20.0
+52.0,21.0
+61.0,63.0
+70.0,80.0
+79.0,130.0
+88.0,153.0
+97.0,153.0
+106.0,146.0
+115.0,111.0
+124.0,55.0
+133.0,8.0
+142.0,0.0
+151.0,0.0
+160.0,0.0
+169.0,0.0
+178.0,0.0
+187.0,0.0
+196.0,0.0
+205.0,0.0
+214.0,2.0
+223.0,6.0
+232.0,13.0
+241.0,5.0
+250.0,9.0
+259.0,9.0
+268.0,5.0
+277.0,4.0
+286.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">103.803,0.0
+103.803,153.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=9, bucket count=31
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [16, 291]
+Mean estimate of displayed sample: 103.8 ± 2.5274 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: stat_hit_by_vehicle)</formula>
+			<comment>How many times Frogger dies hit by a vehicle.</comment>
+			<result outcome="success" type="quantity" value="2.192 ± 0.0673032 (95% CI)" timestamp="2026-05-03 19:25:25 +0200">
+				<details>2.192 ± 0.0673032 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="max: stat_hit_by_vehicle" yaxis="probability density">
+					<series title="density" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.046
+1.0,0.233
+2.0,0.324
+3.0,0.296
+4.0,0.082
+5.0,0.019
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.192,0.0
+2.192,0.324
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.192 ± 0.067303 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: stat_hit_by_vehicle" yaxis="probability">
+					<series title="probability" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.046
+1.0,0.233
+2.0,0.324
+3.0,0.296
+4.0,0.082
+5.0,0.019
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.192,0.0
+2.192,0.324
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.192 ± 0.067303 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: stat_hit_by_vehicle" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.046
+2.0,0.279
+3.0,0.603
+4.0,0.899
+5.0,0.981
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.192,0.0
+2.192,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.192 ± 0.067303 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: stat_hit_by_vehicle" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">0.0,0.003682083896865672
+1.0,0.06088355271374265
+2.0,0.30792138735197855
+3.0,0.6334836955066023
+4.0,0.9169798860881977
+5.0,0.988522963006899
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">0.0,0.0
+1.0,0.03387149854767792
+2.0,0.2513862309732198
+3.0,0.5719080304491755
+4.0,0.8786331764880316
+5.0,0.9704875983749022
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.046
+2.0,0.279
+3.0,0.603
+4.0,0.899
+5.0,0.981
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.192,0.0
+2.192,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.192 ± 0.067303 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: stat_hit_by_vehicle" yaxis="count">
+					<series title="count" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,46.0
+1.0,233.0
+2.0,324.0
+3.0,296.0
+4.0,82.0
+5.0,19.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.192,0.0
+2.192,324.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.192 ± 0.067303 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: stat_drowned)</formula>
+			<comment>How many times Frogger drowns.</comment>
+			<result outcome="success" type="quantity" value="0.071 ± 0.0161851 (95% CI)" timestamp="2026-05-03 19:25:38 +0200">
+				<details>0.071 ± 0.0161851 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="max: stat_drowned" yaxis="probability density">
+					<series title="density" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.93
+1.0,0.069
+2.0,0.001
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.071,0.0
+0.071,0.93
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=3
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 2]
+Mean estimate of displayed sample: 0.071 ± 0.01619 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: stat_drowned" yaxis="probability">
+					<series title="probability" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.93
+1.0,0.069
+2.0,0.001
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.071,0.0
+0.071,0.93
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=3
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 2]
+Mean estimate of displayed sample: 0.071 ± 0.01619 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: stat_drowned" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.93
+2.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.071,0.0
+0.071,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=3
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 2]
+Mean estimate of displayed sample: 0.071 ± 0.01619 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: stat_drowned" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">0.0,0.003682083896865672
+1.0,0.9450284750808301
+2.0,0.9999746825125088
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">0.0,0.0
+1.0,0.9123837665107154
+2.0,0.9944410757201734
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.93
+2.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.071,0.0
+0.071,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=3
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 2]
+Mean estimate of displayed sample: 0.071 ± 0.01619 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: stat_drowned" yaxis="count">
+					<series title="count" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,930.0
+1.0,69.0
+2.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.071,0.0
+0.071,930.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=3
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 2]
+Mean estimate of displayed sample: 0.071 ± 0.01619 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: stat_timeout)</formula>
+			<comment>How many times the game ends because the time is up.</comment>
+			<result outcome="success" type="quantity" value="≈ 0" timestamp="2026-05-03 19:25:51 +0200">
+				<details>≈ 0</details>
+				<plot title="Probability Density Distribution" xaxis="max: stat_timeout" yaxis="probability density">
+					<series title="density" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.0,0.0
+0.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 0]
+Mean estimate of displayed sample: ≈ 0</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: stat_timeout" yaxis="probability">
+					<series title="probability" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.0,0.0
+0.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 0]
+Mean estimate of displayed sample: ≈ 0</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: stat_timeout" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.0,0.0
+0.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 0]
+Mean estimate of displayed sample: ≈ 0</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: stat_timeout" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">0.0,0.003682083896865672
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">0.0,0.0
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.0,0.0
+0.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 0]
+Mean estimate of displayed sample: ≈ 0</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: stat_timeout" yaxis="count">
+					<series title="count" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,1000.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">0.0,0.0
+0.0,1000.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 0]
+Mean estimate of displayed sample: ≈ 0</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>Pr[&lt;=1000] (&lt;&gt; frog_y &gt;= 7)</formula>
+			<comment>How many times Frogger reaches the river.</comment>
+			<result outcome="success" type="interval" value="≥ 0.950056 (95% CI)" timestamp="2026-05-03 19:25:51 +0200">
+				<details>≥ 0.950056 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="run duration in time" yaxis="probability density">
+					<series title="density" type="b(26.000000)" color="0x0000ff" encoding="csv">28.0,0.02403846153846154
+54.0,0.005876068376068376
+80.0,0.007478632478632479
+106.0,5.341880341880342E-4
+132.0,0.0
+158.0,0.0
+184.0,0.0
+210.0,0.0
+236.0,0.0
+262.0,5.341880341880342E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,0.02403846153846154
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Density Confidence Intervals" xaxis="run duration in time" yaxis="probability density">
+					<series title="upper limit" type="b(26.000000)" color="0xa0a0ff" encoding="csv">28.0,0.7363890523983516
+54.0,0.2569401232482781
+80.0,0.30466893329868333
+106.0,0.07497131085391912
+132.0,0.04994408370585468
+158.0,0.04994408370585468
+184.0,0.04994408370585468
+210.0,0.04994408370585468
+236.0,0.04994408370585468
+262.0,0.07497131085391912
+					</series>
+					<series title="lower limit" type="b(26.000000)" color="0x0000ff" encoding="csv">28.0,0.5029859293712835
+54.0,0.07881196318794174
+80.0,0.1105837866784895
+106.0,3.515744052335976E-4
+132.0,0.0
+158.0,0.0
+184.0,0.0
+210.0,0.0
+236.0,0.0
+262.0,3.515744052335976E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,0.028322655861475064
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="run duration in time" yaxis="probability">
+					<series title="probability" type="b(26.000000)" color="0x0000ff" encoding="csv">28.0,0.625
+54.0,0.1527777777777778
+80.0,0.19444444444444445
+106.0,0.013888888888888888
+132.0,0.0
+158.0,0.0
+184.0,0.0
+210.0,0.0
+236.0,0.0
+262.0,0.013888888888888888
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,0.625
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
+					<series title="upper limit" type="b(26.000000)" color="0xa0a0ff" encoding="csv">28.0,0.7363890523983516
+54.0,0.2569401232482781
+80.0,0.30466893329868333
+106.0,0.07497131085391912
+132.0,0.04994408370585468
+158.0,0.04994408370585468
+184.0,0.04994408370585468
+210.0,0.04994408370585468
+236.0,0.04994408370585468
+262.0,0.07497131085391912
+					</series>
+					<series title="lower limit" type="b(26.000000)" color="0x0000ff" encoding="csv">28.0,0.5029859293712835
+54.0,0.07881196318794174
+80.0,0.1105837866784895
+106.0,3.515744052335976E-4
+132.0,0.0
+158.0,0.0
+184.0,0.0
+210.0,0.0
+236.0,0.0
+262.0,3.515744052335976E-4
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,0.7363890523983516
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="run duration in time" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">28.0,0.0
+54.0,0.625
+80.0,0.7777777777777778
+106.0,0.9722222222222222
+132.0,0.9861111111111112
+158.0,0.9861111111111112
+184.0,0.9861111111111112
+210.0,0.9861111111111112
+236.0,0.9861111111111112
+262.0,0.9861111111111112
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">28.0,0.04994408370585468
+54.0,0.7363890523983516
+80.0,0.8673176152121594
+106.0,0.9966180996738268
+132.0,0.9996484255947664
+158.0,0.9996484255947664
+184.0,0.9996484255947664
+210.0,0.9996484255947664
+236.0,0.9996484255947664
+262.0,0.9996484255947664
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">28.0,0.0
+54.0,0.5029859293712835
+80.0,0.6643633721453073
+106.0,0.9032327108865847
+132.0,0.9250286891460808
+158.0,0.9250286891460808
+184.0,0.9250286891460808
+210.0,0.9250286891460808
+236.0,0.9250286891460808
+262.0,0.9250286891460808
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">28.0,0.0
+54.0,0.625
+80.0,0.7777777777777778
+106.0,0.9722222222222222
+132.0,0.9861111111111112
+158.0,0.9861111111111112
+184.0,0.9861111111111112
+210.0,0.9861111111111112
+236.0,0.9861111111111112
+262.0,0.9861111111111112
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="run duration in time" yaxis="count">
+					<series title="count" type="b(26.000000)" color="0x0000ff" encoding="csv">28.0,45.0
+54.0,11.0
+80.0,14.0
+106.0,1.0
+132.0,0.0
+158.0,0.0
+184.0,0.0
+210.0,0.0
+236.0,0.0
+262.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">52.69444444444444,0.0
+52.69444444444444,45.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=26, bucket count=10
+Runs: 72 in total, 72 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [28, 262]
+Mean estimate of displayed sample: 52.69 ± 8.572 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: stat_total_lifespan)</formula>
+			<comment>Average time before Frogger dies.</comment>
+			<result outcome="success" type="quantity" value="267.319 ± 5.08823 (95% CI)" timestamp="2026-05-03 19:26:04 +0200">
+				<details>267.319 ± 5.08823 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="max: stat_total_lifespan" yaxis="probability density">
+					<series title="density" type="b(17.000000)" color="0x0000ff" encoding="csv">29.0,1.1764705882352942E-4
+46.0,0.0
+63.0,1.1764705882352942E-4
+80.0,5.294117647058823E-4
+97.0,5.294117647058823E-4
+114.0,0.0017058823529411764
+131.0,0.0013529411764705882
+148.0,0.0021176470588235292
+165.0,0.0027058823529411765
+182.0,0.0027647058823529413
+199.0,0.0041764705882352945
+216.0,0.004470588235294118
+233.0,0.0041764705882352945
+250.0,0.005
+267.0,0.004294117647058823
+284.0,0.004352941176470588
+301.0,0.004058823529411765
+318.0,0.0038823529411764705
+335.0,0.0029411764705882353
+352.0,0.0029411764705882353
+369.0,0.0027058823529411765
+386.0,0.0010588235294117646
+403.0,0.001176470588235294
+420.0,6.470588235294118E-4
+437.0,2.3529411764705883E-4
+454.0,1.7647058823529413E-4
+471.0,2.3529411764705883E-4
+488.0,2.3529411764705883E-4
+505.0,0.0
+522.0,0.0
+539.0,0.0
+556.0,5.882352941176471E-5
+573.0,5.882352941176471E-5
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">267.319,0.0
+267.319,0.005
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=17, bucket count=33
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [29, 585]
+Mean estimate of displayed sample: 267.32 ± 5.0882 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: stat_total_lifespan" yaxis="probability">
+					<series title="probability" type="b(17.000000)" color="0x0000ff" encoding="csv">29.0,0.002
+46.0,0.0
+63.0,0.002
+80.0,0.009
+97.0,0.009
+114.0,0.029
+131.0,0.023
+148.0,0.036
+165.0,0.046
+182.0,0.047
+199.0,0.071
+216.0,0.076
+233.0,0.071
+250.0,0.085
+267.0,0.073
+284.0,0.074
+301.0,0.069
+318.0,0.066
+335.0,0.05
+352.0,0.05
+369.0,0.046
+386.0,0.018
+403.0,0.02
+420.0,0.011
+437.0,0.004
+454.0,0.003
+471.0,0.004
+488.0,0.004
+505.0,0.0
+522.0,0.0
+539.0,0.0
+556.0,0.001
+573.0,0.001
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">267.319,0.0
+267.319,0.085
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=17, bucket count=33
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [29, 585]
+Mean estimate of displayed sample: 267.32 ± 5.0882 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: stat_total_lifespan" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">29.0,0.0
+46.0,0.002
+63.0,0.002
+80.0,0.004
+97.0,0.013
+114.0,0.022
+131.0,0.051
+148.0,0.074
+165.0,0.11
+182.0,0.156
+199.0,0.203
+216.0,0.274
+233.0,0.35
+250.0,0.421
+267.0,0.506
+284.0,0.579
+301.0,0.653
+318.0,0.722
+335.0,0.788
+352.0,0.838
+369.0,0.888
+386.0,0.934
+403.0,0.952
+420.0,0.972
+437.0,0.983
+454.0,0.987
+471.0,0.99
+488.0,0.994
+505.0,0.998
+522.0,0.998
+539.0,0.998
+556.0,0.998
+573.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">267.319,0.0
+267.319,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=17, bucket count=33
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [29, 585]
+Mean estimate of displayed sample: 267.32 ± 5.0882 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: stat_total_lifespan" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">29.0,0.003682083896865672
+46.0,0.007205838911457498
+63.0,0.007205838911457498
+80.0,0.010209664683929873
+97.0,0.02212780363677849
+114.0,0.033119664514987796
+131.0,0.06651346159493482
+148.0,0.09201173601424908
+165.0,0.13105246363748774
+182.0,0.17999718498898634
+199.0,0.2292883232581411
+216.0,0.3027818183100089
+233.0,0.38047019125597575
+250.0,0.4522957723473419
+267.0,0.5374308925028031
+284.0,0.609829320172563
+301.0,0.6825160263170543
+318.0,0.7495802495485977
+335.0,0.8129547104495867
+352.0,0.8603148884154221
+369.0,0.9068814600783898
+386.0,0.9485914339810815
+403.0,0.9643997346571167
+420.0,0.9813153138044625
+437.0,0.9900664874072834
+454.0,0.9930603824971486
+471.0,0.9951944893089507
+488.0,0.9977950175148487
+505.0,0.9997576988831227
+522.0,0.9997576988831227
+539.0,0.9997576988831227
+556.0,0.9997576988831227
+573.0,0.9999746825125088
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">29.0,0.0
+46.0,2.4230111687723193E-4
+63.0,2.4230111687723193E-4
+80.0,0.0010909079877259719
+97.0,0.006939617502851476
+114.0,0.013837414172073858
+131.0,0.03820523677468616
+148.0,0.05854944426065261
+165.0,0.09127777445946614
+182.0,0.13404912388910878
+199.0,0.17847357632401603
+216.0,0.24655555491546696
+233.0,0.32041612415136567
+250.0,0.390170679827437
+267.0,0.4745336899550642
+284.0,0.547704227652658
+301.0,0.6225798930217138
+318.0,0.6931061822718084
+335.0,0.7613374671308145
+352.0,0.8136753450752311
+369.0,0.8668008344307598
+386.0,0.9167939495385973
+403.0,0.9368598845984908
+420.0,0.9597851126261567
+437.0,0.9729205031351487
+454.0,0.9778721963632215
+471.0,0.9816867569448875
+488.0,0.9869865767290255
+505.0,0.9927941610885425
+522.0,0.9927941610885425
+539.0,0.9927941610885425
+556.0,0.9927941610885425
+573.0,0.9944410757201734
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">29.0,0.0
+46.0,0.002
+63.0,0.002
+80.0,0.004
+97.0,0.013
+114.0,0.022
+131.0,0.051
+148.0,0.074
+165.0,0.11
+182.0,0.156
+199.0,0.203
+216.0,0.274
+233.0,0.35
+250.0,0.421
+267.0,0.506
+284.0,0.579
+301.0,0.653
+318.0,0.722
+335.0,0.788
+352.0,0.838
+369.0,0.888
+386.0,0.934
+403.0,0.952
+420.0,0.972
+437.0,0.983
+454.0,0.987
+471.0,0.99
+488.0,0.994
+505.0,0.998
+522.0,0.998
+539.0,0.998
+556.0,0.998
+573.0,0.999
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">267.319,0.0
+267.319,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=17, bucket count=33
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [29, 585]
+Mean estimate of displayed sample: 267.32 ± 5.0882 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: stat_total_lifespan" yaxis="count">
+					<series title="count" type="b(17.000000)" color="0x0000ff" encoding="csv">29.0,2.0
+46.0,0.0
+63.0,2.0
+80.0,9.0
+97.0,9.0
+114.0,29.0
+131.0,23.0
+148.0,36.0
+165.0,46.0
+182.0,47.0
+199.0,71.0
+216.0,76.0
+233.0,71.0
+250.0,85.0
+267.0,73.0
+284.0,74.0
+301.0,69.0
+318.0,66.0
+335.0,50.0
+352.0,50.0
+369.0,46.0
+386.0,18.0
+403.0,20.0
+420.0,11.0
+437.0,4.0
+454.0,3.0
+471.0,4.0
+488.0,4.0
+505.0,0.0
+522.0,0.0
+539.0,0.0
+556.0,1.0
+573.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">267.319,0.0
+267.319,85.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=17, bucket count=33
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [29, 585]
+Mean estimate of displayed sample: 267.32 ± 5.0882 (95% CI)</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: frog_y)</formula>
+			<comment>Highest Y of Frogger.</comment>
+			<result outcome="success" type="quantity" value="≈ 12" timestamp="2026-05-03 19:26:18 +0200">
+				<details>≈ 12</details>
+				<plot title="Probability Density Distribution" xaxis="max: frog_y" yaxis="probability density">
+					<series title="density" type="b(1.000000)" color="0x0000ff" encoding="csv">12.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">12.0,0.0
+12.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [12, 12]
+Mean estimate of displayed sample: ≈ 12</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: frog_y" yaxis="probability">
+					<series title="probability" type="b(1.000000)" color="0x0000ff" encoding="csv">12.0,1.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">12.0,0.0
+12.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [12, 12]
+Mean estimate of displayed sample: ≈ 12</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: frog_y" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">12.0,0.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">12.0,0.0
+12.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [12, 12]
+Mean estimate of displayed sample: ≈ 12</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: frog_y" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">12.0,0.003682083896865672
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">12.0,0.0
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">12.0,0.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">12.0,0.0
+12.0,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [12, 12]
+Mean estimate of displayed sample: ≈ 12</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: frog_y" yaxis="count">
+					<series title="count" type="b(1.000000)" color="0x0000ff" encoding="csv">12.0,1000.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">12.0,0.0
+12.0,1000.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=1
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [12, 12]
+Mean estimate of displayed sample: ≈ 12</comment>
+				</plot>
+			</result>
+		</query>
+		<query>
+			<formula>E[&lt;=1000; 1000] (max: home_bays_filled)</formula>
+			<comment>Number of filled bays per play.</comment>
+			<result outcome="success" type="quantity" value="2.706 ± 0.0718041 (95% CI)" timestamp="2026-05-03 19:48:16 +0200">
+				<details>2.706 ± 0.0718041 (95% CI)</details>
+				<plot title="Probability Density Distribution" xaxis="max: home_bays_filled" yaxis="probability density">
+					<series title="density" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.025
+1.0,0.124
+2.0,0.285
+3.0,0.304
+4.0,0.21
+5.0,0.052
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.706,0.0
+2.706,0.304
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.706 ± 0.071804 (95% CI)</comment>
+				</plot>
+				<plot title="Probability Distribution" xaxis="max: home_bays_filled" yaxis="probability">
+					<series title="probability" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,0.025
+1.0,0.124
+2.0,0.285
+3.0,0.304
+4.0,0.21
+5.0,0.052
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.706,0.0
+2.706,0.304
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.706 ± 0.071804 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Distribution" xaxis="max: home_bays_filled" yaxis="probability">
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.025
+2.0,0.149
+3.0,0.434
+4.0,0.738
+5.0,0.948
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.706,0.0
+2.706,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.706 ± 0.071804 (95% CI)</comment>
+				</plot>
+				<plot title="Cumulative Probability Confidence Intervals" xaxis="max: home_bays_filled" yaxis="probability">
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">0.0,0.003682083896865672
+1.0,0.03668482305192305
+2.0,0.17260045358082532
+3.0,0.4653751700800323
+4.0,0.7650201302447011
+5.0,0.9609234650560196
+					</series>
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">0.0,0.0
+1.0,0.01624253569688223
+2.0,0.12748860044831303
+3.0,0.4030144929784725
+4.0,0.7095710241553304
+5.0,0.9323649859494927
+					</series>
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">0.0,0.0
+1.0,0.025
+2.0,0.149
+3.0,0.434
+4.0,0.738
+5.0,0.948
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.706,0.0
+2.706,1.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.706 ± 0.071804 (95% CI)</comment>
+				</plot>
+				<plot title="Frequency Histogram" xaxis="max: home_bays_filled" yaxis="count">
+					<series title="count" type="b(1.000000)" color="0x0000ff" encoding="csv">0.0,25.0
+1.0,124.0
+2.0,285.0
+3.0,304.0
+4.0,210.0
+5.0,52.0
+					</series>
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">2.706,0.0
+2.706,304.0
+					</series>
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=1, bucket count=6
+Runs: 1000 in total, 1000 (100%) displayed, 0 (0%) remaining
+Span of displayed sample: [0, 5]
+Mean estimate of displayed sample: 2.706 ± 0.071804 (95% CI)</comment>
+				</plot>
+			</result>
 		</query>
 	</queries>
 </nta>
