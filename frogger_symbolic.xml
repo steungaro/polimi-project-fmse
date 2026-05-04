@@ -22,7 +22,7 @@ const int TOTAL_DIVE_CYCLE = EMERGED_TIME + SUBMERGING_TIME + SUBMERGED_TIME + E
 const int MOVE_SCORE = 1;
 const int BAY_FILLED_SCORE = 5;
 const int LEVEL_WON_SCORE = 100;
-const int LIVES = 5;
+const int LIVES = 4; // 4 respawns means 5 lives (0 to 4)
 
 /*** FROGGER VARIABLES ***/
 
@@ -449,7 +449,7 @@ move_timer = 0</label>
 	<system>// Decomment &amp; comment different systems for with(out) frogger validation
 
 // Queries I and II
-// system GameEngine;
+//system GameEngine;
 
 // Queries III, IV, V, VI, and VII
 system Frogger, GameEngine;</system>
@@ -457,43 +457,43 @@ system Frogger, GameEngine;</system>
 		<query>
 			<formula>A[] (not deadlock)</formula>
 			<comment>Query I: Without considering Frogger (check commented section in System declarations): the game never reaches a deadlock state.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:07:32 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:28:17 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>A[] (forall(i:int[0, NUM_VEHICLES-1]) vehicles[i].y == start_v_y[i]) and (forall(i:int[0, NUM_FLOATS-1]) floats[i].y == start_f_y[i])</formula>
 			<comment>Query II: Without considering Frogger (check commented section in System declarations): all vehicles and floating objects can only move inside their predefined row.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:07:34 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:28:19 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Scored &amp;&amp; (frog_x == 0 || frog_x == 1) &amp;&amp; frog_y == 12</formula>
 			<comment>Query III: Frogger can reach the home bay in position (0,12)–(1,12).</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:29:58 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Scored &amp;&amp; score == 17 &amp;&amp; (frog_x == 8 || frog_x == 9) &amp;&amp; frog_y == 12</formula>
 			<comment>Query IV: Frogger can score 17 points reaching the home bay in position (8,12)–(9,12).</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:29:37 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; frog_y == 6 &amp;&amp; lives == 3</formula>
 			<comment>Query V: Frogger can reach a yellow cell in row 6 after the player has lost two lives.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:07:52 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
 			</result>
 		</query>
 		<query>
-			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; (frog_y == 8 || frog_y == 9 || frog_y == 11) &amp;&amp; lives == 5 &amp;&amp; Frogger.game_timer == 100</formula>
+			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; (frog_y == 8 || frog_y == 9 || frog_y == 11) &amp;&amp; lives == LIVES &amp;&amp; Frogger.game_timer == 100</formula>
 			<comment>Query VI: Frogger may stand on a log (with five lives) 10 seconds after the game starts.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:07:59 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:53 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Dead &amp;&amp; exists(i:int[0, NUM_FLOATS-1]) (floats[i].submerged &amp;&amp; floats[i].y == frog_y &amp;&amp; (frog_x - floats[i].x + (MAX_X + 5)) % (MAX_X + 5) &lt; floats[i].type.size)</formula>
 			<comment>Query VII: Frogger can die riding a diving turtle that transitions to the submerged state.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-02 15:32:45 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 10:31:07 +0200">
 			</result>
 		</query>
 	</queries>
