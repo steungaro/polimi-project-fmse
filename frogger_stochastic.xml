@@ -135,78 +135,6 @@ ActiveEntity floats[NUM_FLOATS] = {
 /*** GAME LOGIC FUNCTIONS ***/
 
 /**
- * @brief Centralized game engine tick. Updates all vehicles and floats based on their 
- *        individual speed timers. Handles continuous movement, torus wrapping for 
- *        entities and Frogger, and dive timer progression for turtles.
- * @param None
- * @return void
- */
-void update_game() {
-    int i;
-    
-    // VEHICLE MOVEMENT
-    for (i = 0; i &lt; NUM_VEHICLES; i++) {
-        // Skip Trucks for SMC; they use their own stochastic template
-        if (vehicles[i].type.size != TRUCK.size) {
-            vehicles[i].move_timer++;
-            if (vehicles[i].move_timer &gt;= vehicles[i].type.speed) {
-                
-                if (vehicles[i].y % 2 != 0) { // Right to Left
-                    if (vehicles[i].x == -1) vehicles[i].x = MAX_X + 1; 
-                    else vehicles[i].x--;
-                } else { // Left to Right
-                    if (vehicles[i].x == MAX_X + 1) vehicles[i].x = -1; 
-                    else vehicles[i].x++;
-                }
-                
-                vehicles[i].move_timer = 0; // Reset safely
-            }
-        }
-    }
-    
-    // FLOATINGS MOVEMENT
-    for (i = 0; i &lt; NUM_FLOATS; i++) {
-        floats[i].move_timer++;
-        
-        // MOVEMENT &amp; CARRYING FROGGER
-        if (floats[i].move_timer &gt;= floats[i].type.speed) {
-            int dist = (frog_x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
-            bool carrying = (frog_y == floats[i].y &amp;&amp; dist &lt; floats[i].type.size);
-
-            if (floats[i].y == 8 || floats[i].y == 9 || floats[i].y == 11) { // Left to Right
-                // Move Log
-                if (floats[i].x == MAX_X + 1) floats[i].x = -1; // Pac-Man logic with 2 box "delay"
-                else floats[i].x++;
-                
-                // Move Frogger
-                if (carrying) {
-                    if (frog_x == MAX_X + 1) frog_x = -1;       // Pac-Man logic with 2 box "delay"
-                    else frog_x++;
-                }
-            } else { // Right to Left
-                // Move Log
-                if (floats[i].x == -1) floats[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
-                else floats[i].x--;
-                
-                // Move Frogger
-                if (carrying) {
-                    if (frog_x == -1) frog_x = MAX_X + 1;       // Pac-Man logic with 2 box "delay"
-                    else frog_x--;
-                }
-            }
-            floats[i].move_timer = 0; // Reset movement timer
-        }
-
-        // DIVING LOGIC
-        if (floats[i].type.is_diving) {
-            floats[i].dive_timer++;
-            floats[i].submerged = (floats[i].dive_timer &gt; (SUBMERGING_TIME + EMERGED_TIME) &amp;&amp; floats[i].dive_timer &lt; TOTAL_DIVE_CYCLE);
-            if (floats[i].dive_timer &gt;= TOTAL_DIVE_CYCLE) floats[i].dive_timer = 0; // Reset dive cycle
-        }
-    }
-}
-
-/**
  * @brief Evaluates if a vehicle occupies a specific coordinate on the map.
  *        Uses parameterized modulo arithmetic to safely evaluate wrapped coordinates 
  *        on the Torus ring, supporting vehicles of any size across the map boundaries.
@@ -314,7 +242,79 @@ vehicle's position and handle Torus wrapping.</label>
 	</template>
 	<template>
 		<name>GameEngine</name>
-		<declaration>clock t;</declaration>
+		<declaration>clock t;
+
+/**
+ * @brief Centralized game engine tick. Updates all vehicles and floats based on their 
+ *        individual speed timers. Handles continuous movement, torus wrapping for 
+ *        entities and Frogger, and dive timer progression for turtles.
+ * @param None
+ * @return void
+ */
+void update_game() {
+    int i;
+    
+    // VEHICLE MOVEMENT
+    for (i = 0; i &lt; NUM_VEHICLES; i++) {
+        // Skip Trucks for SMC; they use their own stochastic template
+        if (vehicles[i].type.size != TRUCK.size) {
+            vehicles[i].move_timer++;
+            if (vehicles[i].move_timer &gt;= vehicles[i].type.speed) {
+                
+                if (vehicles[i].y % 2 != 0) { // Right to Left
+                    if (vehicles[i].x == -1) vehicles[i].x = MAX_X + 1; 
+                    else vehicles[i].x--;
+                } else { // Left to Right
+                    if (vehicles[i].x == MAX_X + 1) vehicles[i].x = -1; 
+                    else vehicles[i].x++;
+                }
+                
+                vehicles[i].move_timer = 0; // Reset safely
+            }
+        }
+    }
+    
+    // FLOATINGS MOVEMENT
+    for (i = 0; i &lt; NUM_FLOATS; i++) {
+        floats[i].move_timer++;
+        
+        // MOVEMENT &amp; CARRYING FROGGER
+        if (floats[i].move_timer &gt;= floats[i].type.speed) {
+            int dist = (frog_x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
+            bool carrying = (frog_y == floats[i].y &amp;&amp; dist &lt; floats[i].type.size);
+
+            if (floats[i].y == 8 || floats[i].y == 9 || floats[i].y == 11) { // Left to Right
+                // Move Log
+                if (floats[i].x == MAX_X + 1) floats[i].x = -1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x++;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == MAX_X + 1) frog_x = -1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x++;
+                }
+            } else { // Right to Left
+                // Move Log
+                if (floats[i].x == -1) floats[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x--;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == -1) frog_x = MAX_X + 1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x--;
+                }
+            }
+            floats[i].move_timer = 0; // Reset movement timer
+        }
+
+        // DIVING LOGIC
+        if (floats[i].type.is_diving) {
+            floats[i].dive_timer++;
+            floats[i].submerged = (floats[i].dive_timer &gt; (SUBMERGING_TIME + EMERGED_TIME) &amp;&amp; floats[i].dive_timer &lt; TOTAL_DIVE_CYCLE);
+            if (floats[i].dive_timer &gt;= TOTAL_DIVE_CYCLE) floats[i].dive_timer = 0; // Reset dive cycle
+        }
+    }
+}</declaration>
 		<location id="id2" x="0" y="0" color="#00ff00">
 			<name x="-76" y="-25">Active</name>
 			<label kind="invariant" x="-76" y="0">t &lt;= 1</label>
@@ -658,114 +658,114 @@ system Frogger, GameEngine, Truck1, Truck2;</system>
 		<query>
 			<formula>Pr[&lt;=1000] (&lt;&gt; Frogger.level &gt; 1 &amp;&amp; score &gt;= 200)</formula>
 			<comment>Simulate the game for a maximum of 1000 time units and estimate the probability of completing the first level while scoring at least 200 points.</comment>
-			<result outcome="success" type="quantity" value="0.0360561 ± 0.033649 (95% CI)" timestamp="2026-05-04 10:32:29 +0200">
+			<result outcome="success" type="quantity" value="0.0360561 ± 0.033649 (95% CI)" timestamp="2026-05-04 14:55:36 +0200">
 				<details>0.0360561 ± 0.033649 (95% CI)</details>
 				<plot title="Probability Density Distribution" xaxis="run duration in time" yaxis="probability density">
-					<series title="density" type="b(28.500000)" color="0x0000ff" encoding="csv">543.0,3.474031613687685E-4
-571.5,0.0
-600.0,3.474031613687685E-4
+					<series title="density" type="b(19.500000)" color="0x0000ff" encoding="csv">600.0,5.077430820005078E-4
+619.5,0.0
+639.0,5.077430820005078E-4
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,3.474031613687685E-4
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,5.077430820005078E-4
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Probability Density Confidence Intervals" xaxis="run duration in time" yaxis="probability density">
-					<series title="upper limit" type="b(28.500000)" color="0xa0a0ff" encoding="csv">543.0,0.05393234742679571
-571.5,0.035864620390003724
-600.0,0.05393234742679571
+					<series title="upper limit" type="b(19.500000)" color="0xa0a0ff" encoding="csv">600.0,0.05393234742679571
+619.5,0.035864620390003724
+639.0,0.05393234742679571
 					</series>
-					<series title="lower limit" type="b(28.500000)" color="0x0000ff" encoding="csv">543.0,2.506399507392151E-4
-571.5,0.0
-600.0,2.506399507392151E-4
+					<series title="lower limit" type="b(19.500000)" color="0x0000ff" encoding="csv">600.0,2.506399507392151E-4
+619.5,0.0
+639.0,2.506399507392151E-4
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,0.001892363067606867
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,0.002765761406502344
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Probability Distribution" xaxis="run duration in time" yaxis="probability">
-					<series title="probability" type="b(28.500000)" color="0x0000ff" encoding="csv">543.0,0.009900990099009901
-571.5,0.0
-600.0,0.009900990099009901
+					<series title="probability" type="b(19.500000)" color="0x0000ff" encoding="csv">600.0,0.009900990099009901
+619.5,0.0
+639.0,0.009900990099009901
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,0.009900990099009901
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,0.009900990099009901
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
-					<series title="upper limit" type="b(28.500000)" color="0xa0a0ff" encoding="csv">543.0,0.05393234742679571
-571.5,0.035864620390003724
-600.0,0.05393234742679571
+					<series title="upper limit" type="b(19.500000)" color="0xa0a0ff" encoding="csv">600.0,0.05393234742679571
+619.5,0.035864620390003724
+639.0,0.05393234742679571
 					</series>
-					<series title="lower limit" type="b(28.500000)" color="0x0000ff" encoding="csv">543.0,2.506399507392151E-4
-571.5,0.0
-600.0,2.506399507392151E-4
+					<series title="lower limit" type="b(19.500000)" color="0x0000ff" encoding="csv">600.0,2.506399507392151E-4
+619.5,0.0
+639.0,2.506399507392151E-4
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,0.05393234742679571
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,0.05393234742679571
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Cumulative Probability Distribution" xaxis="run duration in time" yaxis="probability">
-					<series title="cumulative" type="l" color="0x000000" encoding="csv">543.0,0.0
-571.5,0.009900990099009901
-600.0,0.009900990099009901
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">600.0,0.0
+619.5,0.009900990099009901
+639.0,0.009900990099009901
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,0.01980198019801982
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,0.01980198019801982
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Cumulative Probability Confidence Intervals" xaxis="run duration in time" yaxis="probability">
-					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">543.0,0.035864620390003724
-571.5,0.05393234742679571
-600.0,0.05393234742679571
+					<series title="upper limit" type="k" color="0x0000dd" encoding="csv">600.0,0.035864620390003724
+619.5,0.05393234742679571
+639.0,0.05393234742679571
 					</series>
-					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">543.0,0.0
-571.5,2.506399507392151E-4
-600.0,2.506399507392151E-4
+					<series title="lower limit" type="k" color="0xdd0000" encoding="csv">600.0,0.0
+619.5,2.506399507392151E-4
+639.0,2.506399507392151E-4
 					</series>
-					<series title="cumulative" type="l" color="0x000000" encoding="csv">543.0,0.0
-571.5,0.009900990099009901
-600.0,0.009900990099009901
+					<series title="cumulative" type="l" color="0x000000" encoding="csv">600.0,0.0
+619.5,0.009900990099009901
+639.0,0.009900990099009901
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,0.01980198019801982
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,0.01980198019801982
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 				<plot title="Frequency Histogram" xaxis="run duration in time" yaxis="count">
-					<series title="count" type="b(28.500000)" color="0x0000ff" encoding="csv">543.0,1.0
-571.5,0.0
-600.0,1.0
+					<series title="count" type="b(19.500000)" color="0x0000ff" encoding="csv">600.0,1.0
+619.5,0.0
+639.0,1.0
 					</series>
-					<series title="average" type="pl" color="0x00dd00" encoding="csv">571.5,0.0
-571.5,1.0
+					<series title="average" type="pl" color="0x00dd00" encoding="csv">619.5,0.0
+619.5,1.0
 					</series>
-					<comment>Parameters: α=0.05, ε=0.05, bucket width=28.5, bucket count=3
+					<comment>Parameters: α=0.05, ε=0.05, bucket width=19.5, bucket count=3
 Runs: 101 in total, 2 (1.9802%) displayed, 99 (98.02%) remaining
-Displayed sample set: { 543, 600 }
-Mean estimate of displayed sample: 572 ± 362 (95% CI)</comment>
+Displayed sample set: { 639, 600 }
+Mean estimate of displayed sample: 620 ± 248 (95% CI)</comment>
 				</plot>
 			</result>
 		</query>

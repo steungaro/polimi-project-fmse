@@ -10,7 +10,7 @@ const int INITIAL_Y = 0;      // Initial y coordinate (could be theoretically se
 /*** TIMERS (1 time unit = 0.1s) ***/
 const int INITIAL_TIMEOUT = 300;     // 30s game timer
 const int RESPAWN_DELAY = 20;        // 2s initial delay    
-const int MOVE_DELAY = 1;            // 1s inter-move delaay to prevent Zeno behaviour
+const int MOVE_DELAY = 1;            // 1 time unit inter-move delaay to prevent Zeno behaviour
 const int MAX_OBJECT_SPEED = 10;     // Maximum speed for any object
 const int EMERGED_TIME = 100;        // 10s emerged time for diving turtles
 const int SUBMERGING_TIME = 50;      // 5s submerging time for diving turtles
@@ -99,75 +99,6 @@ ActiveEntity floats[NUM_FLOATS] = {
 /*** GAME LOGIC FUNCTIONS ***/
 
 /**
- * @brief Centralized game engine tick. Updates all vehicles and floats based on their 
- *        individual speed timers. Handles continuous movement, torus wrapping for 
- *        entities and Frogger, and dive timer progression for turtles.
- * @param None
- * @return void
- */
-void update_game() {
-    int i;
-    
-    // VEHICLE MOVEMENT
-    for (i = 0; i &lt; NUM_VEHICLES; i++) {
-        vehicles[i].move_timer++;
-        if (vehicles[i].move_timer &gt;= vehicles[i].type.speed) {
-            
-            if (vehicles[i].y % 2 != 0) { // Right to Left
-                if (vehicles[i].x == -1) vehicles[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
-                else vehicles[i].x--;
-            } else { // Left to Right
-                if (vehicles[i].x == MAX_X + 1) vehicles[i].x = -1; // Pac-Man logic with 2 box "delay"
-                else vehicles[i].x++;
-            }
-            
-            vehicles[i].move_timer = 0; // Reset safely
-        }
-    }
-    
-    // FLOATINGS MOVEMENT
-    for (i = 0; i &lt; NUM_FLOATS; i++) {
-        floats[i].move_timer++;
-        
-        // MOVEMENT &amp; CARRYING FROGGER
-        if (floats[i].move_timer &gt;= floats[i].type.speed) {
-            int dist = (frog_x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
-            bool carrying = (frog_y == floats[i].y &amp;&amp; dist &lt; floats[i].type.size);
-
-            if (floats[i].y == 8 || floats[i].y == 9 || floats[i].y == 11) { // Left to Right
-                // Move Log
-                if (floats[i].x == MAX_X + 1) floats[i].x = -1; // Pac-Man logic with 2 box "delay"
-                else floats[i].x++;
-                
-                // Move Frogger
-                if (carrying) {
-                    if (frog_x == MAX_X + 1) frog_x = -1;       // Pac-Man logic with 2 box "delay"
-                    else frog_x++;
-                }
-            } else { // Right to Left
-                // Move Log
-                if (floats[i].x == -1) floats[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
-                else floats[i].x--;
-                
-                // Move Frogger
-                if (carrying) {
-                    if (frog_x == -1) frog_x = MAX_X + 1;       // Pac-Man logic with 2 box "delay"
-                    else frog_x--;
-                }
-            }
-            floats[i].move_timer = 0; // Reset movement timer
-        }
-
-        // DIVING LOGIC
-        if (floats[i].type.is_diving) {
-            floats[i].dive_timer++;
-            floats[i].submerged = (floats[i].dive_timer &gt; (SUBMERGING_TIME + EMERGED_TIME) &amp;&amp; floats[i].dive_timer &lt; TOTAL_DIVE_CYCLE);
-            if (floats[i].dive_timer &gt;= TOTAL_DIVE_CYCLE) floats[i].dive_timer = 0; // Reset dive cycle
-        }
-    }
-}
-
-/**
  * @brief Evaluates if a vehicle occupies a specific coordinate on the map.
  *        Uses parameterized modulo arithmetic to safely evaluate wrapped coordinates 
  *        on the Torus ring, supporting vehicles of any size across the map boundaries.
@@ -232,7 +163,77 @@ const int start_v_y[NUM_VEHICLES] = {1, 1, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5};
 const int start_f_y[NUM_FLOATS]   = {7, 7, 8, 8, 8, 9, 10, 10, 11, 11};</declaration>
 	<template>
 		<name>GameEngine</name>
-		<declaration>clock t;</declaration>
+		<declaration>clock t;
+
+/**
+ * @brief Centralized game engine tick. Updates all vehicles and floats based on their 
+ *        individual speed timers. Handles continuous movement, torus wrapping for 
+ *        entities and Frogger, and dive timer progression for turtles.
+ * @param None
+ * @return void
+ */
+void update_game() {
+    int i;
+    
+    // VEHICLE MOVEMENT
+    for (i = 0; i &lt; NUM_VEHICLES; i++) {
+        vehicles[i].move_timer++;
+        if (vehicles[i].move_timer &gt;= vehicles[i].type.speed) {
+            
+            if (vehicles[i].y % 2 != 0) { // Right to Left
+                if (vehicles[i].x == -1) vehicles[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
+                else vehicles[i].x--;
+            } else { // Left to Right
+                if (vehicles[i].x == MAX_X + 1) vehicles[i].x = -1; // Pac-Man logic with 2 box "delay"
+                else vehicles[i].x++;
+            }
+            
+            vehicles[i].move_timer = 0; // Reset movement timer
+        }
+    }
+    
+    // FLOATINGS MOVEMENT
+    for (i = 0; i &lt; NUM_FLOATS; i++) {
+        floats[i].move_timer++;
+        
+        // MOVEMENT &amp; CARRYING FROGGER
+        if (floats[i].move_timer &gt;= floats[i].type.speed) {
+            int dist = (frog_x - floats[i].x + (MAX_X + 3)) % (MAX_X + 3);
+            bool carrying = (frog_y == floats[i].y &amp;&amp; dist &lt; floats[i].type.size);
+
+            if (floats[i].y == 8 || floats[i].y == 9 || floats[i].y == 11) { // Left to Right
+                // Move Log
+                if (floats[i].x == MAX_X + 1) floats[i].x = -1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x++;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == MAX_X + 1) frog_x = -1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x++;
+                }
+            } else { // Right to Left
+                // Move Log
+                if (floats[i].x == -1) floats[i].x = MAX_X + 1; // Pac-Man logic with 2 box "delay"
+                else floats[i].x--;
+                
+                // Move Frogger
+                if (carrying) {
+                    if (frog_x == -1) frog_x = MAX_X + 1;       // Pac-Man logic with 2 box "delay"
+                    else frog_x--;
+                }
+            }
+            floats[i].move_timer = 0; // Reset movement timer
+        }
+
+        // DIVING LOGIC
+        if (floats[i].type.is_diving) {
+            floats[i].dive_timer++;
+            floats[i].submerged = (floats[i].dive_timer &gt; (SUBMERGING_TIME + EMERGED_TIME) &amp;&amp; floats[i].dive_timer &lt; TOTAL_DIVE_CYCLE);
+            if (floats[i].dive_timer &gt;= TOTAL_DIVE_CYCLE) floats[i].dive_timer = 0; // Reset dive cycle
+        }
+    }
+}
+</declaration>
 		<location id="id0" x="0" y="0" color="#00ff00">
 			<name x="-76" y="-25">Active</name>
 			<label kind="invariant" x="-76" y="0">t &lt;= 1</label>
@@ -304,8 +305,11 @@ bool is_home_bay() {
  * @return true if the intended move is legal, false if it is blocked by map constraints.
  */
 bool can_jump() {
+    // Prevent jumping when in the wrap zone
     if (frog_x &lt; 0 || frog_x &gt; MAX_X) return false;
-    if (frog_y &gt;= MAX_Y) return false;
+
+    // Prevent jumping when at the upper or lower map bounds
+    if (frog_y &gt;= MAX_Y || frog_y &lt; 0) return false;
     
     // Prevent jumping into a bay that has already been filled
     if (frog_y == MAX_Y - 1) {
@@ -320,7 +324,7 @@ bool can_jump() {
 		</location>
 		<location id="id6" x="-467" y="-8" color="#ffa500">
 			<name x="-450" y="-34">Waiting</name>
-			<label kind="invariant" x="-612" y="8">move_timer &lt;= RESPAWN_DELAY</label>
+			<label kind="invariant" x="-578" y="8">move_timer &lt;= RESPAWN_DELAY</label>
 			<label kind="comments" x="-977" y="544">Waiting: Locks Frogger in the starting bay for the duration of RESPAWN_DELAY. Simulates the arcade respawn animation/pause.</label>
 		</location>
 		<location id="id7" x="76" y="-8" color="#00ff00">
@@ -343,8 +347,8 @@ bool can_jump() {
 			<label kind="comments" x="-977" y="680">Scored: Intermediate state for processing a successful run. Atomically adds points and evaluates whether the game is won.</label>
 			<committed/>
 		</location>
-		<location id="id11" x="-459" y="-331" color="#000000">
-			<name x="-442" y="-357">GameOver</name>
+		<location id="id11" x="-467" y="-331" color="#000000">
+			<name x="-450" y="-357">GameOver</name>
 		</location>
 		<location id="id12" x="76" y="416" color="#000000">
 			<name x="85" y="391">GameWon</name>
@@ -353,9 +357,12 @@ bool can_jump() {
 		<transition id="id13">
 			<source ref="id7"/>
 			<target ref="id9"/>
-			<label kind="synchronisation" x="-25" y="-127">die?</label>
+			<label kind="synchronisation" x="-17" y="-119">die?</label>
 			<label kind="comments" x="-977" y="816">Playing -&gt; Dead (#1): Asynchronous interrupt. The environment crushed or drowned Frogger while he was standing still.</label>
-			<nail x="17" y="-119"/>
+			<nail x="76" y="-85"/>
+			<nail x="17" y="-85"/>
+			<nail x="17" y="-144"/>
+			<nail x="76" y="-144"/>
 		</transition>
 		<transition id="id14">
 			<source ref="id10"/>
@@ -388,17 +395,17 @@ move_timer = 0</label>
 		<transition id="id18">
 			<source ref="id8"/>
 			<target ref="id7"/>
-			<label kind="guard" x="297" y="-51">!is_home_bay() &amp;&amp;
+			<label kind="guard" x="408" y="93">!is_home_bay() &amp;&amp;
 !is_deadly()</label>
 			<label kind="comments" x="-977" y="782">CheckState -&gt; Playing: Destination is an empty road or safe platform. Returns control to the player.</label>
-			<nail x="705" y="-8"/>
-			<nail x="442" y="-8"/>
+			<nail x="748" y="93"/>
+			<nail x="77" y="93"/>
 		</transition>
 		<transition id="id19">
 			<source ref="id8"/>
 			<target ref="id10"/>
-			<label kind="guard" x="297" y="178">is_home_bay() &amp;&amp; !is_deadly()</label>
-			<label kind="assignment" x="297" y="204">score += BAY_FILLED_SCORE,
+			<label kind="guard" x="408" y="178">is_home_bay() &amp;&amp; !is_deadly()</label>
+			<label kind="assignment" x="408" y="204">score += BAY_FILLED_SCORE,
 bay_occupied[frog_x / 4] = true,
 home_bays_filled++</label>
 			<label kind="comments" x="-977" y="918">CheckState -&gt; Scored: Success. The player accurately jumped into an empty home bay</label>
@@ -408,28 +415,28 @@ home_bays_filled++</label>
 		<transition id="id20">
 			<source ref="id8"/>
 			<target ref="id9"/>
-			<label kind="guard" x="646" y="-246">is_deadly()</label>
+			<label kind="guard" x="408" y="-246">is_deadly()</label>
 			<label kind="comments" x="-977" y="884">CheckState -&gt; Deadly: Active suicide. The player jumped directly into a hazard or into the water without a log.</label>
 			<nail x="748" y="-221"/>
 		</transition>
 		<transition id="id21">
 			<source ref="id7"/>
 			<target ref="id9"/>
-			<label kind="guard" x="144" y="-127">game_timer &gt;= INITIAL_TIMEOUT</label>
+			<label kind="guard" x="144" y="-119">game_timer &gt;= INITIAL_TIMEOUT</label>
 			<label kind="comments" x="-977" y="850">Playing -&gt; Dead (#2): Time Over. The player failed to reach a bay before the global stage timer expired.</label>
-			<nail x="136" y="-119"/>
+			<nail x="76" y="-85"/>
+			<nail x="136" y="-85"/>
+			<nail x="136" y="-145"/>
+			<nail x="76" y="-145"/>
 		</transition>
 		<transition id="id22">
 			<source ref="id7"/>
 			<target ref="id8"/>
-			<label kind="guard" x="297" y="42">move_timer &gt;= MOVE_DELAY &amp;&amp;
+			<label kind="guard" x="408" y="-51">move_timer &gt;= MOVE_DELAY &amp;&amp;
 can_jump()</label>
-			<label kind="assignment" x="297" y="85">frog_y++, score += MOVE_SCORE,
+			<label kind="assignment" x="408" y="-8">frog_y++, score += MOVE_SCORE,
 move_timer = 0</label>
 			<label kind="comments" x="-977" y="748">Playing -&gt; CheckState: Executes a forward jump if legal and the move delay has passed. Pauses time to evaluate the new coordinate.</label>
-			<nail x="76" y="85"/>
-			<nail x="433" y="85"/>
-			<nail x="748" y="85"/>
 		</transition>
 		<transition id="id23">
 			<source ref="id6"/>
@@ -469,31 +476,31 @@ system Frogger, GameEngine;</system>
 		<query>
 			<formula>E&lt;&gt; Frogger.Scored &amp;&amp; (frog_x == 0 || frog_x == 1) &amp;&amp; frog_y == 12</formula>
 			<comment>Query III: Frogger can reach the home bay in position (0,12)–(1,12).</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 15:49:37 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Scored &amp;&amp; score == 17 &amp;&amp; (frog_x == 8 || frog_x == 9) &amp;&amp; frog_y == 12</formula>
 			<comment>Query IV: Frogger can score 17 points reaching the home bay in position (8,12)–(9,12).</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 15:49:37 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; frog_y == 6 &amp;&amp; lives == 3</formula>
 			<comment>Query V: Frogger can reach a yellow cell in row 6 after the player has lost two lives.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:47 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 15:49:37 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; (frog_y == 8 || frog_y == 9 || frog_y == 11) &amp;&amp; lives == LIVES &amp;&amp; Frogger.game_timer == 100</formula>
 			<comment>Query VI: Frogger may stand on a log (with five lives) 10 seconds after the game starts.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-04 10:30:53 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 15:49:42 +0200">
 			</result>
 		</query>
 		<query>
 			<formula>E&lt;&gt; Frogger.Dead &amp;&amp; exists(i:int[0, NUM_FLOATS-1]) (floats[i].submerged &amp;&amp; floats[i].y == frog_y &amp;&amp; (frog_x - floats[i].x + (MAX_X + 5)) % (MAX_X + 5) &lt; floats[i].type.size)</formula>
 			<comment>Query VII: Frogger can die riding a diving turtle that transitions to the submerged state.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-04 10:31:07 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-04 15:49:54 +0200">
 			</result>
 		</query>
 	</queries>
