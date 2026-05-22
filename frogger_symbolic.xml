@@ -499,9 +499,9 @@ system Frogger, GameEngine;</system>
 			</result>
 		</query>
 		<query>
-			<formula>E&lt;&gt; Frogger.Dead &amp;&amp; exists(i:int[0, NUM_FLOATS-1]) (floats[i].submerged &amp;&amp; floats[i].y == frog_y &amp;&amp; (frog_x - floats[i].x + (MAX_X + 5)) % (MAX_X + 5) &lt; floats[i].type.size)</formula>
+			<formula>E&lt;&gt; Frogger.Dead &amp;&amp; exists(i:int[0, NUM_FLOATS-1]) (floats[i].submerged &amp;&amp; floats[i].y == frog_y &amp;&amp; (frog_x - floats[i].x + (MAX_X + WRAP_SIZE + 1)) % (MAX_X + WRAP_SIZE + 1) &lt; floats[i].type.size)</formula>
 			<comment>Query VII: Frogger can die riding a diving turtle that transitions to the submerged state.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-19 23:34:42 +0200">
+			<result outcome="success" type="quality" timestamp="2026-05-22 15:37:11 +0200">
 			</result>
 		</query>
 	</queries>
