@@ -487,9 +487,9 @@ system Frogger, GameEngine;</system>
 			</result>
 		</query>
 		<query>
-			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; frog_y == 6 &amp;&amp; lives == 2</formula>
+			<formula>E&lt;&gt; Frogger.Playing &amp;&amp; frog_y == 6 &amp;&amp; lives == LIVES - 2</formula>
 			<comment>Query V: Frogger can reach a yellow cell in row 6 after the player has lost two lives.</comment>
-			<result outcome="success" type="quality" timestamp="2026-05-22 14:32:03 +0200">
+			<result outcome="success" type="quality" timestamp="2026-06-07 16:16:38 +0200">
 			</result>
 		</query>
 		<query>
